@@ -68,10 +68,33 @@ export async function runClaudeCode(
 
   const raw = result.stdout.trim();
 
-  // Claude with --output-format json wraps response in {"result": "..."}
+  // Claude with --output-format json wraps response in a structured envelope
+  // that includes usage stats: cost_usd, duration_ms, num_turns, etc.
   let text: string;
   try {
-    const wrapper = JSON.parse(raw) as { result?: string };
+    const wrapper = JSON.parse(raw) as {
+      result?: string;
+      cost_usd?: number;
+      duration_ms?: number;
+      duration_api_ms?: number;
+      num_turns?: number;
+      session_id?: string;
+      input_tokens?: number;
+      output_tokens?: number;
+    };
+
+    // Log usage stats if available
+    const stats = [
+      wrapper.input_tokens != null ? `input=${wrapper.input_tokens}` : null,
+      wrapper.output_tokens != null ? `output=${wrapper.output_tokens}` : null,
+      wrapper.cost_usd != null ? `cost=$${wrapper.cost_usd.toFixed(4)}` : null,
+      wrapper.duration_ms != null ? `duration=${(wrapper.duration_ms / 1000).toFixed(1)}s` : null,
+      wrapper.num_turns != null ? `turns=${wrapper.num_turns}` : null,
+    ].filter(Boolean);
+    if (stats.length > 0) {
+      console.log(`[claudeRunner] Usage: ${stats.join(", ")}`);
+    }
+
     text = wrapper.result ?? raw;
   } catch {
     text = raw;

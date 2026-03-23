@@ -55,27 +55,6 @@ async function ghPostJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 
-async function openDraftPrFromBranch(
-  repoFullName: string,
-  issueNumber: number,
-  issueTitle: string,
-  baseBranch: string,
-  branchName: string,
-  prBody: string
-): Promise<string> {
-  const pr = await ghPostJson<{ html_url: string; number: number }>(
-    `/repos/${repoFullName}/pulls`,
-    {
-      title: issueTitle,
-      body: `Closes #${issueNumber}\n\n${prBody}`,
-      head: branchName,
-      base: baseBranch,
-      draft: true,
-    }
-  );
-  console.log(`[actionHandler] Draft PR #${pr.number} created: ${pr.html_url}`);
-  return pr.html_url;
-}
 
 async function ghPatch(path: string, body: unknown): Promise<void> {
   return withRetry(async () => {
