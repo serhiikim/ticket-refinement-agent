@@ -51,7 +51,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ✅ Price Analyzer Deployment completed successfully!
+            ✅ Deployment completed successfully!
             Commit: ${{ github.sha }}
 
       - name: Send Telegram notification on failure
@@ -62,5 +62,5 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ❌ Price Analyzer Deployment failed!
+            ❌ Deployment failed!
             Please check the GitHub Actions logs.
