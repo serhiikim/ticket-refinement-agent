@@ -42,3 +42,25 @@ jobs:
             git pull origin main
             npm install
             sudo /usr/bin/systemctl restart ai-ticket-agent.service
+     
+      - name: Send Telegram notification on success
+        if: success()
+        continue-on-error: true
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ✅ Price Analyzer Deployment completed successfully!
+            Commit: ${{ github.sha }}
+
+      - name: Send Telegram notification on failure
+        if: failure()
+        continue-on-error: true
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ❌ Price Analyzer Deployment failed!
+            Please check the GitHub Actions logs.
