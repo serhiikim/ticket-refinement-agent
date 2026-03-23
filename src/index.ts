@@ -72,27 +72,23 @@ app.post("/webhook/github", async (c) => {
 
   const { repoFullName, issueNumber } = filter;
 
-  // Look up local repo
-  const repoConfig = config.repos[repoFullName!];
-  if (!repoConfig) {
-    console.warn(`[webhook] No local repo configured for ${repoFullName}`);
-    return c.json({ error: `no repo config for ${repoFullName}` }, 404);
-  }
-
-  // Respond immediately, process async
-  c.header("Content-Type", "application/json");
-  const response = new Response(JSON.stringify({ accepted: true }), {
-    status: 202,
-    headers: { "Content-Type": "application/json" },
-  });
-
   // Dedup: skip if already processing this issue
+  // This check MUST happen synchronously (no awaits between has() and add())
+  // to prevent two simultaneous events from both passing the check
   const jobKey = `${repoFullName}#${issueNumber}`;
   if (processingSet.has(jobKey)) {
     console.log(`[webhook] Skipping duplicate job ${jobKey}`);
     return c.json({ skipped: true, reason: "duplicate" });
   }
   processingSet.add(jobKey);
+
+  // Look up local repo
+  const repoConfig = config.repos[repoFullName!];
+  if (!repoConfig) {
+    processingSet.delete(jobKey);
+    console.warn(`[webhook] No local repo configured for ${repoFullName}`);
+    return c.json({ error: `no repo config for ${repoFullName}` }, 404);
+  }
 
   // Serialize per repo, fire-and-forget
   withRepoLock(repoConfig.localPath, () =>
@@ -104,7 +100,7 @@ app.post("/webhook/github", async (c) => {
     processingSet.delete(jobKey);
   });
 
-  return response;
+  return c.json({ accepted: true }, 202);
 });
 
 async function processIssue(
