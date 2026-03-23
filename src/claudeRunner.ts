@@ -29,8 +29,9 @@ export async function runClaudeCode(
   }
 
   // Run claude code with --print flag (non-interactive JSON output)
+  const claudeBin = process.env.CLAUDE_BIN ?? "claude";
   const result = spawnSync(
-    "claude",
+    claudeBin,
     ["--print", "--output-format", "json", prompt],
     {
       cwd: localPath,
@@ -101,7 +102,7 @@ export async function runClaudeCodeImplement(
   try {
     // Run Claude to write code (--dangerously-skip-permissions allows file writes without prompts)
     spawnSync(
-      "claude",
+      claudeBin,
       ["--print", "--dangerously-skip-permissions", prompt],
       {
         cwd: localPath,
