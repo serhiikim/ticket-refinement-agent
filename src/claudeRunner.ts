@@ -1,5 +1,7 @@
 import { execSync, spawnSync } from "node:child_process";
 
+const claudeBin = process.env.CLAUDE_BIN ?? "claude";
+
 export interface ClaudeResponse {
   action: "clarify" | "enhance";
   // clarify
@@ -29,7 +31,6 @@ export async function runClaudeCode(
   }
 
   // Run claude code with --print flag (non-interactive JSON output)
-  const claudeBin = process.env.CLAUDE_BIN ?? "claude";
   const result = spawnSync(
     claudeBin,
     ["--print", "--output-format", "json", prompt],
