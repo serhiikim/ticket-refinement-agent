@@ -21,7 +21,9 @@ const repoLocks = new Map<string, Promise<void>>();
 
 function withRepoLock(localPath: string, fn: () => Promise<void>): Promise<void> {
   const prev = repoLocks.get(localPath) ?? Promise.resolve();
-  const next = prev.then(fn).catch(() => {});
+  const next = prev.then(fn).catch((err) => {
+    console.error(`[repoLock] Job failed for ${localPath}:`, err);
+  });
   repoLocks.set(localPath, next);
   return next;
 }
