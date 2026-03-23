@@ -86,9 +86,51 @@ git clone https://github.com/your-org/your-repo.git /home/user/repos/your-repo
 
 ### 4. Start
 
+**Development:**
 ```bash
 npm start          # production
-npm run dev        # watch mode
+npm run dev        # watch mode (restarts on file changes)
+```
+
+**Production — systemctl (recommended):**
+
+Create `/etc/systemd/system/ai-ticket-agent.service`:
+```ini
+[Unit]
+Description=AI Ticket Agent
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/agent
+ExecStart=/usr/bin/node /path/to/agent/node_modules/.bin/tsx index.ts
+Restart=on-failure
+RestartSec=3
+EnvironmentFile=/path/to/agent/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable ai-ticket-agent
+sudo systemctl start ai-ticket-agent
+
+# Logs
+journalctl -u ai-ticket-agent -f
+```
+
+**Production — PM2:**
+```bash
+npm install -g pm2
+pm2 start ecosystem.config.cjs
+pm2 save && pm2 startup   # auto-start on reboot
+
+# Logs
+pm2 logs ai-ticket-agent
 ```
 
 ### 5. Nginx reverse proxy
