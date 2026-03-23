@@ -151,7 +151,14 @@ async function processIssue(
         codingPrompt
       );
       if (pushedBranch) {
-        await postDraftPrComment(repoFullName, issueNumber, repoConfig.branch, branchName);
+        await postDraftPrComment(
+          repoFullName,
+          issueNumber,
+          ctx.issue.title,
+          repoConfig.branch,
+          branchName,
+          enhance
+        );
       }
     }
   } else {

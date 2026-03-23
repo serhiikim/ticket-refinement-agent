@@ -237,16 +237,45 @@ export async function handleEnhance(
 export async function postDraftPrComment(
   repoFullName: string,
   issueNumber: number,
+  issueTitle: string,
   baseBranch: string,
-  branchName: string
+  branchName: string,
+  analysis: ClaudeResponse & { action: "enhance" }
 ): Promise<void> {
+  const { description, acceptanceCriteria, affectedFiles } = analysis;
+
+  const prBodySections = [
+    `Closes #${issueNumber}`,
+    "",
+    "## Summary",
+    description ?? "",
+  ];
+
+  if (acceptanceCriteria?.length) {
+    prBodySections.push(
+      "",
+      "## Acceptance Criteria",
+      ...acceptanceCriteria.map((c) => `- [ ] ${c}`)
+    );
+  }
+
+  if (affectedFiles?.length) {
+    prBodySections.push(
+      "",
+      "## Changed Files",
+      ...affectedFiles.map((f) => `- \`${f}\``)
+    );
+  }
+
+  prBodySections.push("", "_Scaffolded by AI Ticket Agent_");
+
   let prUrl: string;
   try {
     const pr = await ghPostJson<{ html_url: string; number: number }>(
       `/repos/${repoFullName}/pulls`,
       {
-        title: `Draft: issue #${issueNumber}`,
-        body: `Closes #${issueNumber}`,
+        title: issueTitle,
+        body: prBodySections.join("\n"),
         head: branchName,
         base: baseBranch,
         draft: true,
