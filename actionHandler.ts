@@ -1,0 +1,258 @@
+import { config } from "./config.ts";
+import type { ClaudeResponse } from "./claudeRunner.ts";
+
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 1500): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (i < retries - 1) {
+        await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+
+async function ghPost(path: string, body: unknown): Promise<void> {
+  return withRetry(async () => {
+    const res = await fetch(`https://api.github.com${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.githubToken}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(`GitHub POST ${path} → ${res.status} ${await res.text()}`);
+    }
+  });
+}
+
+async function ghPostJson<T>(path: string, body: unknown): Promise<T> {
+  return withRetry(async () => {
+    const res = await fetch(`https://api.github.com${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.githubToken}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(`GitHub POST ${path} → ${res.status} ${await res.text()}`);
+    }
+    return res.json() as Promise<T>;
+  });
+}
+
+
+async function openDraftPrFromBranch(
+  repoFullName: string,
+  issueNumber: number,
+  issueTitle: string,
+  baseBranch: string,
+  branchName: string,
+  prBody: string
+): Promise<string> {
+  const pr = await ghPostJson<{ html_url: string; number: number }>(
+    `/repos/${repoFullName}/pulls`,
+    {
+      title: issueTitle,
+      body: `Closes #${issueNumber}\n\n${prBody}`,
+      head: branchName,
+      base: baseBranch,
+      draft: true,
+    }
+  );
+  console.log(`[actionHandler] Draft PR #${pr.number} created: ${pr.html_url}`);
+  return pr.html_url;
+}
+
+async function ghPatch(path: string, body: unknown): Promise<void> {
+  return withRetry(async () => {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${config.githubToken}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`GitHub PATCH ${path} → ${res.status} ${await res.text()}`);
+  }
+  });
+}
+
+async function swapLabel(
+  repoFullName: string,
+  issueNumber: number,
+  remove: string,
+  add: string
+): Promise<void> {
+  // Add new label
+  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/labels`, {
+    labels: [add],
+  });
+  // Remove old label (ignore 404 if it wasn't there)
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/labels/${encodeURIComponent(remove)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${config.githubToken}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    }
+  );
+  if (!res.ok && res.status !== 404) {
+    console.warn(`[actionHandler] Could not remove label ${remove}: ${res.status}`);
+  }
+}
+
+export async function handleClarify(
+  repoFullName: string,
+  issueNumber: number,
+  response: ClaudeResponse & { action: "clarify" }
+): Promise<void> {
+  const questions = response.questions ?? [];
+  const body = [
+    "### Clarifying Questions",
+    "",
+    "I need a bit more context before I can fully analyze this ticket. Could you help with the following?",
+    "",
+    ...questions.map((q, i) => `${i + 1}. ${q}`),
+    "",
+    "_Once answered, I'll pick this up again automatically._",
+  ].join("\n");
+
+  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
+    body,
+  });
+
+  await swapLabel(
+    repoFullName,
+    issueNumber,
+    config.labels.ready,
+    config.labels.clarifying
+  );
+
+  console.log(`[actionHandler] Posted clarifying questions on ${repoFullName}#${issueNumber}`);
+}
+
+export async function handleEnhance(
+  repoFullName: string,
+  issueNumber: number,
+  issueTitle: string,
+  baseBranch: string,
+  response: ClaudeResponse & { action: "enhance" },
+  pushedBranch?: string
+): Promise<void> {
+  const { description, acceptanceCriteria, affectedFiles, edgeCases, risks, createDraftPr } =
+    response;
+
+  // Build enhanced issue body
+  const sections: string[] = [description ?? ""];
+
+  if (acceptanceCriteria?.length) {
+    sections.push(
+      "## Acceptance Criteria",
+      ...acceptanceCriteria.map((c) => `- [ ] ${c}`)
+    );
+  }
+  if (affectedFiles?.length) {
+    sections.push(
+      "## Affected Files",
+      ...affectedFiles.map((f) => `- \`${f}\``)
+    );
+  }
+  if (edgeCases?.length) {
+    sections.push(
+      "## Edge Cases",
+      ...edgeCases.map((e) => `- ${e}`)
+    );
+  }
+  if (risks?.length) {
+    sections.push(
+      "## Risks",
+      ...risks.map((r) => `- ${r}`)
+    );
+  }
+
+  sections.push("", "_Enhanced by AI Ticket Agent_");
+
+  const enhancedBody = sections.join("\n\n");
+
+  // Update issue body
+  await ghPatch(`/repos/${repoFullName}/issues/${issueNumber}`, {
+    body: enhancedBody,
+  });
+
+  // Optionally create draft PR
+  let prUrl: string | null = null;
+  if (createDraftPr && pushedBranch) {
+    // Branch already pushed with real commits — create PR directly
+    try {
+      prUrl = await openDraftPrFromBranch(
+        repoFullName,
+        issueNumber,
+        issueTitle,
+        baseBranch,
+        pushedBranch,
+        enhancedBody
+      );
+    } catch (e) {
+      console.warn(`[actionHandler] Draft PR creation failed:`, e);
+    }
+  } else if (createDraftPr && !pushedBranch) {
+    // No code changes — skip PR, not worth creating an empty one
+    console.log(`[actionHandler] createDraftPr=true but no code changes, skipping PR`);
+  }
+
+  // Post summary comment
+  const summary = [
+    "### Ticket Enhanced",
+    "",
+    "I've analyzed the codebase and updated the issue body with:",
+    acceptanceCriteria?.length ? `- **${acceptanceCriteria.length}** acceptance criteria` : null,
+    affectedFiles?.length ? `- **${affectedFiles.length}** affected file(s)` : null,
+    edgeCases?.length ? `- **${edgeCases.length}** edge case(s)` : null,
+    risks?.length ? `- **${risks.length}** risk(s)` : null,
+    prUrl ? `\nDraft PR ready: ${prUrl}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
+    body: summary,
+  });
+
+  await swapLabel(
+    repoFullName,
+    issueNumber,
+    config.labels.ready,
+    config.labels.done
+  );
+
+  // Also swap clarifying → done if it's there
+  await swapLabel(
+    repoFullName,
+    issueNumber,
+    config.labels.clarifying,
+    config.labels.done
+  ).catch(() => {});
+
+  console.log(`[actionHandler] Enhanced issue ${repoFullName}#${issueNumber}`);
+}
