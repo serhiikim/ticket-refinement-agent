@@ -1,6 +1,15 @@
 import { execSync, spawnSync } from "node:child_process";
 
-const claudeBin = process.env.CLAUDE_BIN ?? "claude";
+function resolveClaudeBin(): string {
+  if (process.env.CLAUDE_BIN) return process.env.CLAUDE_BIN;
+  try {
+    return execSync("which claude", { encoding: "utf8" }).trim();
+  } catch {
+    return "claude"; // fallback, will fail with a clear ENOENT if not found
+  }
+}
+
+const claudeBin = resolveClaudeBin();
 
 export interface ClaudeResponse {
   action: "clarify" | "enhance";
@@ -94,8 +103,8 @@ export async function runClaudeCodeImplement(
     { stdio: "pipe", timeout: 30_000 }
   );
 
-  // Create new branch
-  execSync(`git -C "${localPath}" checkout -b "${branchName}"`, {
+  // Create or reset branch (-B force-recreates if it already exists)
+  execSync(`git -C "${localPath}" checkout -B "${branchName}"`, {
     stdio: "pipe",
     timeout: 10_000,
   });
