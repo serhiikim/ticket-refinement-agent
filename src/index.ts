@@ -154,10 +154,33 @@ async function processIssue(
   }
 }
 
-serve(
+export { app, repoLocks };
+
+const server = serve(
   { fetch: app.fetch, port: config.port },
   (info) => {
     console.log(`AI Ticket Agent listening on http://localhost:${info.port}`);
     console.log(`Webhook endpoint: POST /webhook/github`);
   }
 );
+
+let shuttingDown = false;
+
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received, draining in-flight jobs...`);
+
+  // Stop accepting new connections
+  server.close();
+
+  // Wait for all repo locks (in-flight jobs) to finish
+  await Promise.allSettled([...repoLocks.values()]);
+
+  console.log("[shutdown] All jobs drained, exiting.");
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
