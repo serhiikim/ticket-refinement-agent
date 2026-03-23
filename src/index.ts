@@ -6,7 +6,7 @@ import { config } from "./config.ts";
 import { filterEvent } from "./eventFilter.ts";
 import { buildContext, buildPrompt, buildCodingPrompt } from "./contextBuilder.ts";
 import { runClaudeCode, runClaudeCodeImplement } from "./claudeRunner.ts";
-import { handleClarify, handleEnhance } from "./actionHandler.ts";
+import { handleClarify, handleEnhance, postDraftPrComment } from "./actionHandler.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
 
 function slugify(title: string): string {
@@ -129,28 +129,31 @@ async function processIssue(
     await handleClarify(repoFullName, issueNumber, result as ClaudeResponse & { action: "clarify" });
   } else if (result.action === "enhance") {
     const enhance = result as ClaudeResponse & { action: "enhance" };
-    let pushedBranch: string | undefined;
 
-    if (enhance.createDraftPr) {
-      const branchName = `ai/issue-${issueNumber}-${slugify(ctx.issue.title)}`;
-      const codingPrompt = buildCodingPrompt(ctx, enhance);
-      console.log(`[process] Running coding pass on branch ${branchName}`);
-      pushedBranch = await runClaudeCodeImplement(
-        repoConfig.localPath,
-        repoConfig.branch,
-        branchName,
-        codingPrompt
-      );
-    }
-
+    // Update issue description first
     await handleEnhance(
       repoFullName,
       issueNumber,
       ctx.issue.title,
       repoConfig.branch,
-      enhance,
-      pushedBranch
+      enhance
     );
+
+    // Then run coding pass if requested
+    if (enhance.createDraftPr) {
+      const branchName = `ai/issue-${issueNumber}-${slugify(ctx.issue.title)}`;
+      const codingPrompt = buildCodingPrompt(ctx, enhance);
+      console.log(`[process] Running coding pass on branch ${branchName}`);
+      const pushedBranch = await runClaudeCodeImplement(
+        repoConfig.localPath,
+        repoConfig.branch,
+        branchName,
+        codingPrompt
+      );
+      if (pushedBranch) {
+        await postDraftPrComment(repoFullName, issueNumber, repoConfig.branch, branchName);
+      }
+    }
   } else {
     console.warn(`[process] Unknown action: ${(result as { action: string }).action}`);
   }

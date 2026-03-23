@@ -157,10 +157,9 @@ export async function handleEnhance(
   issueNumber: number,
   issueTitle: string,
   baseBranch: string,
-  response: ClaudeResponse & { action: "enhance" },
-  pushedBranch?: string
+  response: ClaudeResponse & { action: "enhance" }
 ): Promise<void> {
-  const { description, acceptanceCriteria, affectedFiles, edgeCases, risks, createDraftPr } =
+  const { description, acceptanceCriteria, affectedFiles, edgeCases, risks } =
     response;
 
   // Build enhanced issue body
@@ -200,27 +199,6 @@ export async function handleEnhance(
     body: enhancedBody,
   });
 
-  // Optionally create draft PR
-  let prUrl: string | null = null;
-  if (createDraftPr && pushedBranch) {
-    // Branch already pushed with real commits — create PR directly
-    try {
-      prUrl = await openDraftPrFromBranch(
-        repoFullName,
-        issueNumber,
-        issueTitle,
-        baseBranch,
-        pushedBranch,
-        enhancedBody
-      );
-    } catch (e) {
-      console.warn(`[actionHandler] Draft PR creation failed:`, e);
-    }
-  } else if (createDraftPr && !pushedBranch) {
-    // No code changes — skip PR, not worth creating an empty one
-    console.log(`[actionHandler] createDraftPr=true but no code changes, skipping PR`);
-  }
-
   // Post summary comment
   const summary = [
     "### Ticket Enhanced",
@@ -230,7 +208,6 @@ export async function handleEnhance(
     affectedFiles?.length ? `- **${affectedFiles.length}** affected file(s)` : null,
     edgeCases?.length ? `- **${edgeCases.length}** edge case(s)` : null,
     risks?.length ? `- **${risks.length}** risk(s)` : null,
-    prUrl ? `\nDraft PR ready: ${prUrl}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -255,4 +232,34 @@ export async function handleEnhance(
   ).catch(() => {});
 
   console.log(`[actionHandler] Enhanced issue ${repoFullName}#${issueNumber}`);
+}
+
+export async function postDraftPrComment(
+  repoFullName: string,
+  issueNumber: number,
+  baseBranch: string,
+  branchName: string
+): Promise<void> {
+  let prUrl: string;
+  try {
+    const pr = await ghPostJson<{ html_url: string; number: number }>(
+      `/repos/${repoFullName}/pulls`,
+      {
+        title: `Draft: issue #${issueNumber}`,
+        body: `Closes #${issueNumber}`,
+        head: branchName,
+        base: baseBranch,
+        draft: true,
+      }
+    );
+    prUrl = pr.html_url;
+    console.log(`[actionHandler] Draft PR #${pr.number} created: ${prUrl}`);
+  } catch (e) {
+    console.warn(`[actionHandler] Draft PR creation failed:`, e);
+    return;
+  }
+
+  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
+    body: `### Draft PR Ready\n\nCode scaffold has been pushed: ${prUrl}`,
+  });
 }
