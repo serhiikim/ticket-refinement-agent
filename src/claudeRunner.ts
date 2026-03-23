@@ -35,7 +35,7 @@ export async function runClaudeCode(
     {
       cwd: localPath,
       encoding: "utf8",
-      timeout: 120_000,
+      timeout: 300_000, // 5 min — large repos need time
       env: {
         ...process.env,
         // Disable telemetry noise
@@ -44,10 +44,15 @@ export async function runClaudeCode(
     }
   );
 
+  if (result.error) {
+    throw new Error(`Claude Code failed to run: ${result.error.message}`);
+  }
+
   if (result.status !== 0) {
-    throw new Error(
-      `Claude Code exited ${result.status}: ${result.stderr?.slice(0, 500)}`
-    );
+    const detail = result.signal
+      ? `killed by signal ${result.signal}`
+      : result.stderr?.slice(0, 500) ?? "no stderr";
+    throw new Error(`Claude Code exited ${result.status}: ${detail}`);
   }
 
   const raw = result.stdout.trim();
@@ -101,7 +106,7 @@ export async function runClaudeCodeImplement(
       {
         cwd: localPath,
         encoding: "utf8",
-        timeout: 180_000,
+        timeout: 300_000,
         env: { ...process.env, CLAUDE_NO_TELEMETRY: "1" },
       }
     );
