@@ -40,10 +40,10 @@ export async function runClaudeCode(
     console.warn("[claudeRunner] git pull failed, continuing with local state:", e);
   }
 
-  // Run claude code with --print flag (non-interactive JSON output)
+  // Run claude code with --print flag (non-interactive, stream-json for token counts)
   const result = spawnSync(
     claudeBin,
-    ["--print", "--output-format", "json", prompt],
+    ["--print", "--output-format", "stream-json", prompt],
     {
       cwd: localPath,
       encoding: "utf8",
@@ -67,38 +67,45 @@ export async function runClaudeCode(
     throw new Error(`Claude Code exited ${result.status}: ${detail}`);
   }
 
-  const raw = result.stdout.trim();
+  // stream-json emits NDJSON: one event per line.
+  // "assistant" events carry per-turn token usage; "result" event has cost/duration summary.
+  let text = result.stdout.trim();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd: number | undefined;
+  let durationMs: number | undefined;
+  let numTurns: number | undefined;
 
-  // Claude with --output-format json wraps response in a structured envelope
-  // that includes usage stats: cost_usd, duration_ms, num_turns, etc.
-  let text: string;
-  try {
-    const wrapper = JSON.parse(raw) as {
-      result?: string;
-      cost_usd?: number;
-      duration_ms?: number;
-      duration_api_ms?: number;
-      num_turns?: number;
-      session_id?: string;
-      input_tokens?: number;
-      output_tokens?: number;
-    };
-
-    // Log usage stats if available
-    const stats = [
-      wrapper.input_tokens != null ? `input=${wrapper.input_tokens}` : null,
-      wrapper.output_tokens != null ? `output=${wrapper.output_tokens}` : null,
-      wrapper.cost_usd != null ? `cost=$${wrapper.cost_usd.toFixed(4)}` : null,
-      wrapper.duration_ms != null ? `duration=${(wrapper.duration_ms / 1000).toFixed(1)}s` : null,
-      wrapper.num_turns != null ? `turns=${wrapper.num_turns}` : null,
-    ].filter(Boolean);
-    if (stats.length > 0) {
-      console.log(`[claudeRunner] Usage: ${stats.join(", ")}`);
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>;
+      if (event.type === "assistant") {
+        const usage = (event.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
+        if (usage) {
+          inputTokens += usage.input_tokens ?? 0;
+          outputTokens += usage.output_tokens ?? 0;
+        }
+      } else if (event.type === "result") {
+        costUsd = event.cost_usd as number | undefined;
+        durationMs = event.duration_ms as number | undefined;
+        numTurns = event.num_turns as number | undefined;
+        text = (event.result as string | undefined) ?? text;
+      }
+    } catch {
+      // skip malformed lines
     }
+  }
 
-    text = wrapper.result ?? raw;
-  } catch {
-    text = raw;
+  const stats = [
+    inputTokens > 0 ? `input=${inputTokens}` : null,
+    outputTokens > 0 ? `output=${outputTokens}` : null,
+    costUsd != null ? `cost=$${costUsd.toFixed(4)}` : null,
+    durationMs != null ? `duration=${(durationMs / 1000).toFixed(1)}s` : null,
+    numTurns != null ? `turns=${numTurns}` : null,
+  ].filter(Boolean);
+  if (stats.length > 0) {
+    console.log(`[claudeRunner] Usage: ${stats.join(", ")}`);
   }
 
   // Strip markdown code fences if present
