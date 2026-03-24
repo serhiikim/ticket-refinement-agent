@@ -5,7 +5,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { config } from "./config.ts";
 import { filterEvent } from "./eventFilter.ts";
 import { buildContext, buildPrompt, buildCodingPrompt } from "./contextBuilder.ts";
-import { runClaudeCode, runClaudeCodeImplement } from "./claudeRunner.ts";
+import { runClaudeCode, runClaudeCodeImplement, hasClaudeMd } from "./claudeRunner.ts";
 import { handleClarify, handleEnhance, postDraftPrComment } from "./actionHandler.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
 
@@ -138,7 +138,9 @@ async function processIssue(
     // Then run coding pass if requested
     if (enhance.createDraftPr) {
       const branchName = `ai/issue-${issueNumber}-${slugify(ctx.issue.title)}`;
-      const codingPrompt = buildCodingPrompt(ctx, enhance);
+      const claudeMdExists = hasClaudeMd(repoConfig.localPath);
+      console.log(`[process] CLAUDE.md ${claudeMdExists ? "found" : "not found — will create"}`);
+      const codingPrompt = buildCodingPrompt(ctx, enhance, claudeMdExists);
       console.log(`[process] Running coding pass on branch ${branchName}`);
       const pushedBranch = await runClaudeCodeImplement(
         repoConfig.localPath,

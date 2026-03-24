@@ -103,10 +103,30 @@ Set \`createDraftPr: true\` only when the scope is clear and bounded enough that
 Analyze the issue and codebase now, then respond with JSON only.`;
 }
 
-export function buildCodingPrompt(ctx: IssueContext, analysis: ClaudeResponse): string {
+export function buildCodingPrompt(
+  ctx: IssueContext,
+  analysis: ClaudeResponse,
+  claudeMdExists: boolean
+): string {
   const files = analysis.affectedFiles?.map((f) => `- ${f}`).join("\n") ?? "(none identified)";
   const criteria = analysis.acceptanceCriteria?.map((c) => `- ${c}`).join("\n") ?? "";
   const edgeCases = analysis.edgeCases?.map((e) => `- ${e}`).join("\n") ?? "";
+
+  const claudeMdSection = claudeMdExists
+    ? `## CLAUDE.md
+Read CLAUDE.md first — it contains architecture context and conventions for this codebase.
+After implementing, if your changes introduce a new module, pattern, entity, or architectural decision
+that future Claude runs should know about, update CLAUDE.md to reflect it. Only update if the change
+is structural — skip for small bug fixes or UI tweaks.`
+    : `## CLAUDE.md
+No CLAUDE.md exists in this repo yet. After implementing the issue, create one that documents:
+- What this project does (1-2 sentences)
+- Tech stack and architecture overview
+- Key directories and what they contain
+- Coding conventions used in this codebase
+- Any domain-specific terms a developer needs to know
+
+Keep it concise and factual — it will be read by Claude on every future ticket.`;
 
   return `You are implementing a GitHub issue in an existing codebase.
 
@@ -122,6 +142,8 @@ ${files}
 
 ## Edge Cases to Handle
 ${edgeCases}
+
+${claudeMdSection}
 
 ## Instructions
 - Read the affected files first, understand existing patterns and code style

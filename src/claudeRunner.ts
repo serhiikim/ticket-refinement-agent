@@ -1,4 +1,5 @@
 import { execSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 function resolveClaudeBin(): string {
   if (process.env.CLAUDE_BIN) return process.env.CLAUDE_BIN;
@@ -114,6 +115,10 @@ export async function runClaudeCode(
  * Runs Claude Code to implement changes on a new branch, commits, and pushes.
  * Returns the branch name if commits were made, undefined if nothing changed.
  */
+export function hasClaudeMd(localPath: string): boolean {
+  return existsSync(`${localPath}/CLAUDE.md`);
+}
+
 export async function runClaudeCodeImplement(
   localPath: string,
   baseBranch: string,
