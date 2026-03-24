@@ -40,17 +40,16 @@ export async function runClaudeCode(
     console.warn("[claudeRunner] git pull failed, continuing with local state:", e);
   }
 
-  // Run claude code with --print flag (non-interactive, stream-json for token counts)
+  // Run claude code with --print flag (non-interactive JSON output)
   const result = spawnSync(
     claudeBin,
-    ["--print", "--output-format", "stream-json", prompt],
+    ["--print", "--output-format", "json", prompt],
     {
       cwd: localPath,
       encoding: "utf8",
       timeout: 300_000, // 5 min — large repos need time
       env: {
         ...process.env,
-        // Disable telemetry noise
         CLAUDE_NO_TELEMETRY: "1",
       },
     }
@@ -67,45 +66,12 @@ export async function runClaudeCode(
     throw new Error(`Claude Code exited ${result.status}: ${detail}`);
   }
 
-  // stream-json emits NDJSON: one event per line.
-  // "assistant" events carry per-turn token usage; "result" event has cost/duration summary.
-  let text = result.stdout.trim();
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let costUsd: number | undefined;
-  let durationMs: number | undefined;
-  let numTurns: number | undefined;
-
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>;
-      if (event.type === "assistant") {
-        const usage = (event.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
-        if (usage) {
-          inputTokens += usage.input_tokens ?? 0;
-          outputTokens += usage.output_tokens ?? 0;
-        }
-      } else if (event.type === "result") {
-        costUsd = event.cost_usd as number | undefined;
-        durationMs = event.duration_ms as number | undefined;
-        numTurns = event.num_turns as number | undefined;
-        text = (event.result as string | undefined) ?? text;
-      }
-    } catch {
-      // skip malformed lines
-    }
-  }
-
-  const stats = [
-    inputTokens > 0 ? `input=${inputTokens}` : null,
-    outputTokens > 0 ? `output=${outputTokens}` : null,
-    costUsd != null ? `cost=$${costUsd.toFixed(4)}` : null,
-    durationMs != null ? `duration=${(durationMs / 1000).toFixed(1)}s` : null,
-    numTurns != null ? `turns=${numTurns}` : null,
-  ].filter(Boolean);
-  if (stats.length > 0) {
-    console.log(`[claudeRunner] Usage: ${stats.join(", ")}`);
+  let text: string;
+  try {
+    const wrapper = JSON.parse(result.stdout.trim()) as { result?: string };
+    text = wrapper.result ?? result.stdout.trim();
+  } catch {
+    text = result.stdout.trim();
   }
 
   // Strip markdown code fences if present

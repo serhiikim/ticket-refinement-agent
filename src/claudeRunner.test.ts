@@ -20,19 +20,16 @@ beforeEach(() => {
 
 describe("runClaudeCode", () => {
   it("parses a valid JSON response wrapped in {result}", async () => {
-    const inner = JSON.stringify({
-      action: "enhance",
-      description: "Fixed the bug",
-      acceptanceCriteria: ["It works"],
-      affectedFiles: ["src/foo.ts"],
-    });
     mockSpawnSync.mockReturnValue({
       status: 0,
-      // stream-json NDJSON: "result" event carries the actual text
-      stdout: [
-        JSON.stringify({ type: "assistant", message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
-        JSON.stringify({ type: "result", subtype: "success", cost_usd: 0.001, duration_ms: 3000, num_turns: 1, result: inner }),
-      ].join("\n"),
+      stdout: JSON.stringify({
+        result: JSON.stringify({
+          action: "enhance",
+          description: "Fixed the bug",
+          acceptanceCriteria: ["It works"],
+          affectedFiles: ["src/foo.ts"],
+        }),
+      }),
       stderr: "",
       pid: 1,
       output: [],
@@ -73,7 +70,7 @@ describe("runClaudeCode", () => {
 
     mockSpawnSync.mockReturnValue({
       status: 0,
-      stdout: JSON.stringify({ type: "result", subtype: "success", result: "```json\n" + json + "\n```" }),
+      stdout: JSON.stringify({ result: "```json\n" + json + "\n```" }),
       stderr: "",
       pid: 1,
       output: [],
