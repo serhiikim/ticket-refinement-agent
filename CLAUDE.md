@@ -29,7 +29,7 @@ Uses a **Ports & Adapters** design: the core pipeline (`index.ts`) only talks to
 3. **`ITicketProvider.getTicket()` + `getComments()`** → fetches ticket context; `src/contextBuilder.ts` builds Claude prompts from the returned generic types
 4. **`src/claudeRunner.ts`** → runs `claude --print --output-format json` as subprocess; git-resets local repo clone to latest before each run; supports `--resume $sessionId` for session continuity
 5. **`ITicketProvider.postComment()` / `updateDescription()` / `updateStatus()`** → posts comments, updates ticket body, transitions workflow state
-6. **`ISourceControlProvider.createDraftPr()`** → creates draft PR; returns URL which is posted as a comment
+6. **`ISourceControlProvider.createDraftPr()`** → creates draft PR; returns `{ url, prNumber }` which is posted as a comment
 7. **`src/sessions.ts`** → persists `sessionKey → sessionId` to `sessions.json` for cross-webhook session continuity
 8. **`src/githubAuth.ts`** → GitHub App JWT auth; generates installation tokens (1hr TTL) with caching
 
@@ -62,7 +62,9 @@ ai-ready      → analysis → ai-enhanced  (description updated, waiting for hu
 ai-ready      → analysis → ai-clarifying (Claude needs more info)
 ai-clarifying + comment  → re-run analysis (session resumed)
 ai-enhanced   + comment  → refine description (session resumed)
-ai-enhanced   + ai-code label → coding pass → ai-done
+ai-enhanced   + ai-code label → coding pass → ai-pr-prepared
+ai-pr-prepared + comment  → review pass → updates PR → ai-pr-prepared
+issue closed             → session cleared
 ```
 
 **Bot identity:** All comments are posted via GitHub App (not PAT), appearing as `your-app[bot]`. Self-loop prevention relies on `user.type === "Bot"` — no HTML marker needed.

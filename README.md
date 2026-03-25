@@ -19,12 +19,14 @@ Add the `ai-ready` label to any GitHub issue and the agent:
 ai-ready → ai-clarifying     needs questions answered; comment to resume
 ai-ready → ai-enhanced       description updated; review and refine or approve
 ai-enhanced + comment   →    refines description (Claude resumes same session)
-ai-enhanced + ai-code   →    coding pass → draft PR → ai-done
+ai-enhanced + ai-code   →    coding pass → draft PR → ai-pr-prepared
+ai-pr-prepared + comment →   review pass → updates PR → ai-pr-prepared
+Issue closed            →    clears session
 ```
 
 ## Session continuity
 
-Each ticket gets a persistent Claude Code session ID stored in `sessions.json`. Follow-up interactions (comments, label triggers) automatically resume the same session via `--resume`, so Claude has full context of what it previously analyzed without rebuilding the prompt from scratch. Sessions are cleared when the ticket reaches `ai-done`.
+Each ticket gets a persistent Claude Code session ID stored in `sessions.json`. Follow-up interactions (comments, label triggers) automatically resume the same session via `--resume`, so Claude has full context of what it previously analyzed without rebuilding the prompt from scratch. Sessions are cleared when the issue is closed.
 
 ## Architecture
 
@@ -115,7 +117,7 @@ git clone https://github.com/your-org/your-repo.git /home/user/repos/your-repo
 
 ### 5. Create labels in your GitHub repo
 
-Create these five labels: `ai-ready`, `ai-clarifying`, `ai-enhanced`, `ai-code`, `ai-done`.
+Create these labels: `ai-ready`, `ai-clarifying`, `ai-enhanced`, `ai-code`, `ai-pr-prepared`.
 
 ### 6. Start
 
