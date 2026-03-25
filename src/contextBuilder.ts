@@ -1,63 +1,11 @@
-import { config } from "./config.ts";
-import { getGitHubToken } from "./githubAuth.ts";
+import type { TicketContext, TicketComment } from "./types.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
 
-interface Issue {
-  title: string;
-  body: string;
-  number: number;
-  labels: { name: string }[];
-}
-
-interface Comment {
-  id: number;
-  body: string;
-  user: { login: string; type: string };
-  created_at: string;
-}
-
-export interface IssueContext {
-  repoFullName: string;
-  issue: Issue;
-  comments: Comment[];
-}
-
-async function ghFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`https://api.github.com${path}`, {
-    headers: {
-      Authorization: `Bearer ${await getGitHubToken()}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${path} → ${res.status} ${await res.text()}`);
-  }
-  return res.json() as Promise<T>;
-}
-
-export async function buildContext(
-  repoFullName: string,
-  issueNumber: number
-): Promise<IssueContext> {
-  const [issue, comments] = await Promise.all([
-    ghFetch<Issue>(`/repos/${repoFullName}/issues/${issueNumber}`),
-    ghFetch<Comment[]>(
-      `/repos/${repoFullName}/issues/${issueNumber}/comments?per_page=100`
-    ),
-  ]);
-
-  return { repoFullName, issue, comments };
-}
-
-export function buildPrompt(ctx: IssueContext): string {
+export function buildPrompt(ticket: TicketContext, comments: TicketComment[]): string {
   const commentHistory =
-    ctx.comments.length > 0
-      ? ctx.comments
-          .map(
-            (c) =>
-              `**${c.user.login}** (${c.created_at}):\n${c.body}`
-          )
+    comments.length > 0
+      ? comments
+          .map((c) => `**${c.authorLogin}** (${c.createdAt}):\n${c.body}`)
           .join("\n\n---\n\n")
       : "(no comments yet)";
 
@@ -70,11 +18,11 @@ Your job is to either ask clarifying questions OR enhance the issue with technic
 - Only ask questions if the code cannot answer them
 - Return ONLY valid JSON, no extra text, no markdown fences
 
-## Issue: ${ctx.repoFullName}#${ctx.issue.number}
-**Title**: ${ctx.issue.title}
+## Issue: ${ticket.ticketId}
+**Title**: ${ticket.title}
 
 **Body**:
-${ctx.issue.body || "(empty)"}
+${ticket.body || "(empty)"}
 
 ## Comment History
 ${commentHistory}
@@ -105,10 +53,11 @@ Analyze the issue and codebase now, then respond with JSON only.`;
 }
 
 export function buildCodingPrompt(
-  ctx: IssueContext,
+  ticket: TicketContext,
   analysis: ClaudeResponse,
   claudeMdExists: boolean
 ): string {
+  const issueNumber = ticket.ticketId.split("#")[1] ?? ticket.ticketId;
   const files = analysis.affectedFiles?.map((f) => `- ${f}`).join("\n") ?? "(none identified)";
   const criteria = analysis.acceptanceCriteria?.map((c) => `- ${c}`).join("\n") ?? "";
   const edgeCases = analysis.edgeCases?.map((e) => `- ${e}`).join("\n") ?? "";
@@ -131,9 +80,9 @@ Keep it concise and factual — it will be read by Claude on every future ticket
 
   return `You are implementing a GitHub issue in an existing codebase.
 
-## Issue #${ctx.issue.number}: ${ctx.issue.title}
+## Issue #${issueNumber}: ${ticket.title}
 
-${analysis.description ?? ctx.issue.body ?? ""}
+${analysis.description ?? ticket.body ?? ""}
 
 ## Acceptance Criteria
 ${criteria}

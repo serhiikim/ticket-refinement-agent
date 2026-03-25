@@ -1,15 +1,15 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { config } from "./config.ts";
-import { filterEvent } from "./eventFilter.ts";
-import { buildContext, buildPrompt, buildCodingPrompt, buildResumedCodingPrompt } from "./contextBuilder.ts";
+import { buildPrompt, buildCodingPrompt, buildResumedCodingPrompt } from "./contextBuilder.ts";
 import { runClaudeCode, runClaudeCodeImplement, hasClaudeMd } from "./claudeRunner.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
-import { handleClarify, handleEnhance, handleCodingComplete, postDraftPrComment } from "./actionHandler.ts";
 import { loadSessions, getSessionId, setSessionId, clearSessionId } from "./sessions.ts";
-import type { TriggerReason } from "./eventFilter.ts";
+import { GitHubWebhookAdapter } from "./adapters/GitHubWebhookAdapter.ts";
+import { GitHubTicketProvider } from "./adapters/GitHubTicketProvider.ts";
+import { GitHubSourceControlProvider } from "./adapters/GitHubSourceControlProvider.ts";
+import type { GenericTicketEvent, ITicketProvider, ISourceControlProvider } from "./types.ts";
 
 function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
@@ -33,31 +33,18 @@ function withRepoLock(localPath: string, fn: () => Promise<void>): Promise<void>
 loadSessions();
 
 const app = new Hono();
+const githubAdapter = new GitHubWebhookAdapter();
 
 app.get("/health", (c) => c.json({ ok: true }));
 
 app.post("/webhook/github", async (c) => {
   const rawBody = await c.req.text();
-  const sig = c.req.header("x-hub-signature-256") ?? "";
-  const eventType = c.req.header("x-github-event") ?? "";
+  const headers: Record<string, string> = {
+    "x-hub-signature-256": c.req.header("x-hub-signature-256") ?? "",
+    "x-github-event": c.req.header("x-github-event") ?? "",
+  };
 
-  // Verify HMAC signature
-  const expected =
-    "sha256=" +
-    createHmac("sha256", config.webhookSecret).update(rawBody).digest("hex");
-
-  let sigBuf: Buffer, expBuf: Buffer;
-  try {
-    sigBuf = Buffer.from(sig);
-    expBuf = Buffer.from(expected);
-  } catch {
-    return c.json({ error: "bad signature format" }, 400);
-  }
-
-  if (
-    sigBuf.length !== expBuf.length ||
-    !timingSafeEqual(sigBuf, expBuf)
-  ) {
+  if (!githubAdapter.verifySignature(rawBody, headers)) {
     console.warn("[webhook] Invalid signature");
     return c.json({ error: "invalid signature" }, 401);
   }
@@ -69,32 +56,32 @@ app.post("/webhook/github", async (c) => {
     return c.json({ error: "invalid JSON" }, 400);
   }
 
-  const filter = filterEvent(eventType, payload);
-  if (!filter.shouldProcess) {
+  const event = githubAdapter.parseEvent(headers["x-github-event"], payload);
+  if (!event) {
     return c.json({ skipped: true });
   }
 
-  const { repoFullName, issueNumber, reason } = filter;
-
-  // Dedup: skip if already processing this issue
-  const jobKey = `${repoFullName}#${issueNumber}`;
+  // Dedup: skip if already processing this ticket
+  const jobKey = `${event.platform}:${event.ticketId}`;
   if (processingSet.has(jobKey)) {
     console.log(`[webhook] Skipping duplicate job ${jobKey}`);
     return c.json({ skipped: true, reason: "duplicate" });
   }
   processingSet.add(jobKey);
 
-  // Look up local repo
-  const repoConfig = config.repos[repoFullName!];
+  const repoConfig = config.repos[event.repoIdentifier];
   if (!repoConfig) {
     processingSet.delete(jobKey);
-    console.warn(`[webhook] No local repo configured for ${repoFullName}`);
-    return c.json({ error: `no repo config for ${repoFullName}` }, 404);
+    console.warn(`[webhook] No local repo configured for ${event.repoIdentifier}`);
+    return c.json({ error: `no repo config for ${event.repoIdentifier}` }, 404);
   }
+
+  const ticketProvider = new GitHubTicketProvider();
+  const scProvider = new GitHubSourceControlProvider(event.repoIdentifier);
 
   // Serialize per repo, fire-and-forget
   withRepoLock(repoConfig.localPath, () =>
-    processIssue(repoFullName!, issueNumber!, repoConfig, reason!).finally(() => {
+    processIssue(event, repoConfig, ticketProvider, scProvider).finally(() => {
       processingSet.delete(jobKey);
     })
   ).catch((err) => {
@@ -106,24 +93,24 @@ app.post("/webhook/github", async (c) => {
 });
 
 async function processIssue(
-  repoFullName: string,
-  issueNumber: number,
+  event: GenericTicketEvent,
   repoConfig: { localPath: string; branch: string },
-  reason: TriggerReason
+  ticketProvider: ITicketProvider,
+  scProvider: ISourceControlProvider
 ): Promise<void> {
-  console.log(`[process] Starting ${repoFullName}#${issueNumber} (${reason})`);
+  console.log(`[process] Starting ${event.ticketId} (${event.triggerReason})`);
+  const sessionKey = `${event.platform}:${event.ticketId}`;
 
-  const issueKey = `${repoFullName}#${issueNumber}`;
-
-  if (reason === "code_trigger") {
-    await runCodingPass(repoFullName, issueNumber, repoConfig, issueKey);
+  if (event.triggerReason === "code_trigger") {
+    await runCodingPass(event, repoConfig, sessionKey, ticketProvider, scProvider);
     return;
   }
 
   // Analysis pass
-  const ctx = await buildContext(repoFullName, issueNumber);
-  const prompt = buildPrompt(ctx);
-  const sessionId = getSessionId(issueKey);
+  const ticket = await ticketProvider.getTicket(event.ticketId);
+  const comments = await ticketProvider.getComments(event.ticketId);
+  const prompt = buildPrompt(ticket, comments);
+  const sessionId = getSessionId(sessionKey);
 
   let runResult = await runClaudeCode(
     repoConfig.localPath,
@@ -133,53 +120,65 @@ async function processIssue(
   ).catch(async (err) => {
     // Session may have expired — retry with a fresh session
     if (sessionId) {
-      console.warn(`[process] Session resume failed for ${issueKey}, retrying fresh:`, err.message);
-      clearSessionId(issueKey);
+      console.warn(`[process] Session resume failed for ${sessionKey}, retrying fresh:`, err.message);
+      clearSessionId(sessionKey);
       return runClaudeCode(repoConfig.localPath, repoConfig.branch, prompt);
     }
     throw err;
   });
 
   if (runResult.sessionId) {
-    setSessionId(issueKey, runResult.sessionId);
+    setSessionId(sessionKey, runResult.sessionId);
   }
 
   const result = runResult.response;
-  console.log(`[process] Claude action: ${result.action} for ${repoFullName}#${issueNumber}`);
+  console.log(`[process] Claude action: ${result.action} for ${event.ticketId}`);
 
   if (result.action === "clarify") {
-    await handleClarify(repoFullName, issueNumber, result as ClaudeResponse & { action: "clarify" });
+    const questions = (result as ClaudeResponse & { action: "clarify" }).questions ?? [];
+    const body = [
+      "### Clarifying Questions",
+      "",
+      "I need a bit more context before I can fully analyze this ticket. Could you help with the following?",
+      "",
+      ...questions.map((q, i) => `${i + 1}. ${q}`),
+      "",
+      "_Once answered, I'll pick this up again automatically._",
+    ].join("\n");
+    await ticketProvider.postComment(event.ticketId, body);
+    await ticketProvider.updateStatus(event.ticketId, "clarifying");
+    console.log(`[process] Posted clarifying questions on ${event.ticketId}`);
   } else if (result.action === "enhance") {
-    await handleEnhance(
-      repoFullName,
-      issueNumber,
-      ctx.issue.title,
-      repoConfig.branch,
-      result as ClaudeResponse & { action: "enhance" }
-    );
+    const r = result as ClaudeResponse & { action: "enhance" };
+    const enhancedBody = buildEnhancedBody(r);
+    await ticketProvider.updateDescription(event.ticketId, enhancedBody);
+    await ticketProvider.postComment(event.ticketId, buildEnhancedSummary(r));
+    await ticketProvider.updateStatus(event.ticketId, "enhanced");
+    console.log(`[process] Enhanced ticket ${event.ticketId}`);
   } else {
     console.warn(`[process] Unknown action: ${(result as { action: string }).action}`);
   }
 }
 
 async function runCodingPass(
-  repoFullName: string,
-  issueNumber: number,
+  event: GenericTicketEvent,
   repoConfig: { localPath: string; branch: string },
-  issueKey: string
+  sessionKey: string,
+  ticketProvider: ITicketProvider,
+  scProvider: ISourceControlProvider
 ): Promise<void> {
-  const ctx = await buildContext(repoFullName, issueNumber);
-  const sessionId = getSessionId(issueKey);
-  const branchName = `ai/issue-${issueNumber}-${slugify(ctx.issue.title)}`;
+  const ticket = await ticketProvider.getTicket(event.ticketId);
+  const sessionId = getSessionId(sessionKey);
+  const issueNumber = event.ticketId.split("#")[1] ?? event.ticketId;
+  const branchName = `ai/issue-${issueNumber}-${slugify(ticket.title)}`;
   const claudeMdExists = hasClaudeMd(repoConfig.localPath);
 
   console.log(`[process] CLAUDE.md ${claudeMdExists ? "found" : "not found — will create"}`);
   console.log(`[process] Running coding pass on branch ${branchName}${sessionId ? " (resuming session)" : ""}`);
 
-  // If we have a session, use a short resumed prompt; otherwise fall back to full prompt
   const codingPrompt = sessionId
     ? buildResumedCodingPrompt(claudeMdExists)
-    : buildCodingPrompt(ctx, { action: "enhance" }, claudeMdExists);
+    : buildCodingPrompt(ticket, { action: "enhance" }, claudeMdExists);
 
   const pushedBranch = await runClaudeCodeImplement(
     repoConfig.localPath,
@@ -190,17 +189,63 @@ async function runCodingPass(
   );
 
   if (pushedBranch) {
-    await postDraftPrComment(
-      repoFullName,
-      issueNumber,
-      ctx.issue.title,
+    // Build issue URL from ticketId "org/repo#123"
+    const [repoFull, issueNumStr] = event.ticketId.split("#");
+    const issueUrl = `https://github.com/${repoFull}/issues/${issueNumStr}`;
+    const prUrl = await scProvider.createDraftPr(
+      ticket.title,
       repoConfig.branch,
       branchName,
+      { platform: event.platform, id: event.ticketId, url: issueUrl }
+    );
+    await ticketProvider.postComment(
+      event.ticketId,
+      `### Draft PR Ready\n\nCode scaffold has been pushed: ${prUrl}`
     );
   }
 
-  await handleCodingComplete(repoFullName, issueNumber);
-  clearSessionId(issueKey);
+  await ticketProvider.updateStatus(event.ticketId, "done");
+  clearSessionId(sessionKey);
+}
+
+/** Build the enhanced issue body from a Claude enhance response */
+function buildEnhancedBody(r: ClaudeResponse & { action: "enhance" }): string {
+  const { description, acceptanceCriteria, affectedFiles, edgeCases, risks } = r;
+  const sections: string[] = [description ?? ""];
+
+  if (acceptanceCriteria?.length) {
+    sections.push("## Acceptance Criteria", ...acceptanceCriteria.map((c) => `- [ ] ${c}`));
+  }
+  if (affectedFiles?.length) {
+    sections.push("## Affected Files", ...affectedFiles.map((f) => `- \`${f}\``));
+  }
+  if (edgeCases?.length) {
+    sections.push("## Edge Cases", ...edgeCases.map((e) => `- ${e}`));
+  }
+  if (risks?.length) {
+    sections.push("## Risks", ...risks.map((rv) => `- ${rv}`));
+  }
+  sections.push("", "_Enhanced by AI Ticket Agent_");
+  return sections.join("\n\n");
+}
+
+/** Build the summary comment posted after enhancement */
+function buildEnhancedSummary(r: ClaudeResponse & { action: "enhance" }): string {
+  const { acceptanceCriteria, affectedFiles, edgeCases, risks } = r;
+  return [
+    "### Ticket Enhanced",
+    "",
+    "I've analyzed the codebase and updated the issue body with:",
+    acceptanceCriteria?.length ? `- **${acceptanceCriteria.length}** acceptance criteria` : null,
+    affectedFiles?.length ? `- **${affectedFiles.length}** affected file(s)` : null,
+    edgeCases?.length ? `- **${edgeCases.length}** edge case(s)` : null,
+    risks?.length ? `- **${risks.length}** risk(s)` : null,
+    "",
+    `**Ready to proceed?** Add the \`${config.labels.code}\` label to start the coding pass.`,
+    "_Want changes? Leave a comment and I'll refine the description._",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export { app, repoLocks };

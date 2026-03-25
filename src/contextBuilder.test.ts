@@ -1,25 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { buildPrompt, buildCodingPrompt, type IssueContext } from "./contextBuilder.ts";
+import { buildPrompt, buildCodingPrompt } from "./contextBuilder.ts";
+import type { TicketContext, TicketComment } from "./types.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
 
-function makeContext(overrides: Partial<IssueContext> = {}): IssueContext {
+function makeTicket(overrides: Partial<TicketContext> = {}): TicketContext {
   return {
-    repoFullName: "org/repo",
-    issue: {
-      title: "Fix login bug",
-      body: "Users cannot log in after password reset.",
-      number: 7,
-      labels: [{ name: "ai-ready" }],
-    },
-    comments: [],
+    ticketId: "org/repo#7",
+    title: "Fix login bug",
+    body: "Users cannot log in after password reset.",
+    labels: ["ai-ready"],
+    ...overrides,
+  };
+}
+
+function makeComment(overrides: Partial<TicketComment> = {}): TicketComment {
+  return {
+    id: "1",
+    body: "Can you clarify the scope?",
+    authorLogin: "alice",
+    authorType: "user",
+    isAgentComment: false,
+    createdAt: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }
 
 describe("buildPrompt", () => {
   it("includes issue title and body", () => {
-    const ctx = makeContext();
-    const prompt = buildPrompt(ctx);
+    const prompt = buildPrompt(makeTicket(), []);
 
     expect(prompt).toContain("Fix login bug");
     expect(prompt).toContain("Users cannot log in after password reset.");
@@ -27,30 +35,27 @@ describe("buildPrompt", () => {
   });
 
   it("shows (no comments yet) when there are no comments", () => {
-    const ctx = makeContext({ comments: [] });
-    const prompt = buildPrompt(ctx);
+    const prompt = buildPrompt(makeTicket(), []);
 
     expect(prompt).toContain("(no comments yet)");
   });
 
   it("includes comment history when comments exist", () => {
-    const ctx = makeContext({
-      comments: [
-        {
-          id: 1,
-          body: "Can you clarify the scope?",
-          user: { login: "alice", type: "User" },
-          created_at: "2026-01-01T00:00:00Z",
-        },
-        {
-          id: 2,
-          body: "Sure, it affects the login page only.",
-          user: { login: "bob", type: "User" },
-          created_at: "2026-01-01T01:00:00Z",
-        },
-      ],
-    });
-    const prompt = buildPrompt(ctx);
+    const comments: TicketComment[] = [
+      makeComment({
+        id: "1",
+        body: "Can you clarify the scope?",
+        authorLogin: "alice",
+        createdAt: "2026-01-01T00:00:00Z",
+      }),
+      makeComment({
+        id: "2",
+        body: "Sure, it affects the login page only.",
+        authorLogin: "bob",
+        createdAt: "2026-01-01T01:00:00Z",
+      }),
+    ];
+    const prompt = buildPrompt(makeTicket(), comments);
 
     expect(prompt).toContain("alice");
     expect(prompt).toContain("Can you clarify the scope?");
@@ -60,7 +65,7 @@ describe("buildPrompt", () => {
   });
 
   it("includes JSON output format instructions", () => {
-    const prompt = buildPrompt(makeContext());
+    const prompt = buildPrompt(makeTicket(), []);
 
     expect(prompt).toContain('"action":"clarify"');
     expect(prompt).toContain('"action": "enhance"');
@@ -68,10 +73,7 @@ describe("buildPrompt", () => {
   });
 
   it("handles empty body gracefully", () => {
-    const ctx = makeContext({
-      issue: { title: "Empty", body: "", number: 1, labels: [] },
-    });
-    const prompt = buildPrompt(ctx);
+    const prompt = buildPrompt(makeTicket({ body: "" }), []);
 
     expect(prompt).toContain("(empty)");
   });
@@ -79,7 +81,7 @@ describe("buildPrompt", () => {
 
 describe("buildCodingPrompt", () => {
   it("includes affected files and acceptance criteria", () => {
-    const ctx = makeContext();
+    const ticket = makeTicket();
     const analysis: ClaudeResponse = {
       action: "enhance",
       description: "Refactored login flow",
@@ -88,7 +90,7 @@ describe("buildCodingPrompt", () => {
       edgeCases: ["Expired reset token"],
     };
 
-    const prompt = buildCodingPrompt(ctx, analysis, true);
+    const prompt = buildCodingPrompt(ticket, analysis, true);
 
     expect(prompt).toContain("src/auth/login.ts");
     expect(prompt).toContain("src/auth/reset.ts");
@@ -99,12 +101,12 @@ describe("buildCodingPrompt", () => {
   });
 
   it("handles missing optional fields", () => {
-    const ctx = makeContext();
+    const ticket = makeTicket();
     const analysis: ClaudeResponse = {
       action: "enhance",
     };
 
-    const prompt = buildCodingPrompt(ctx, analysis, false);
+    const prompt = buildCodingPrompt(ticket, analysis, false);
 
     expect(prompt).toContain("(none identified)");
     expect(prompt).toContain("Issue #7");

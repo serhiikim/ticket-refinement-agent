@@ -28,17 +28,25 @@ Each ticket gets a persistent Claude Code session ID stored in `sessions.json`. 
 
 ## Architecture
 
+The codebase uses a Ports & Adapters design to decouple the ticket platform (GitHub Issues, Jira, …) from the source control platform (GitHub, GitLab, …). The core pipeline only talks to interfaces; adapters implement them.
+
 ```
 src/
-  index.ts          — Hono server, webhook verification, dedup + per-repo locking, orchestration
-  eventFilter.ts    — decides which events trigger processing and why
-  contextBuilder.ts — fetches GitHub context, builds analysis + coding prompts
-  claudeRunner.ts   — runs Claude Code subprocess (analysis + coding passes, session resume)
-  actionHandler.ts  — posts comments, updates issue body, swaps labels, creates draft PRs
-  config.ts         — parses all environment variables
-  sessions.ts       — persists issueKey → sessionId to disk
-  githubAuth.ts     — GitHub App JWT auth with installation token caching
+  index.ts                               — Hono server, webhook routing, dedup + per-repo locking, orchestration
+  types.ts                               — IWebhookAdapter, ITicketProvider, ISourceControlProvider, shared types
+  eventFilter.ts                         — internal GitHub label state machine (used by GitHubWebhookAdapter)
+  contextBuilder.ts                      — builds analysis + coding prompts from generic TicketContext/TicketComment
+  claudeRunner.ts                        — runs Claude Code subprocess (analysis + coding passes, session resume)
+  config.ts                              — parses all environment variables
+  sessions.ts                            — persists sessionKey → sessionId to disk
+  githubAuth.ts                          — GitHub App JWT auth with installation token caching
+  adapters/
+    GitHubWebhookAdapter.ts              — HMAC verification + GitHub payload → GenericTicketEvent
+    GitHubTicketProvider.ts              — GitHub Issues API (read ticket, post comments, update labels)
+    GitHubSourceControlProvider.ts       — GitHub Pulls API (create draft PR)
 ```
+
+Adding a new ticket platform (e.g. Jira) means writing a `JiraWebhookAdapter` and `JiraTicketProvider`, adding a route, and updating `.env` — no changes to the core pipeline.
 
 ## Requirements
 
