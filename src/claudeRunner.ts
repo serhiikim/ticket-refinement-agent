@@ -159,7 +159,7 @@ export async function runClaudeCodeImplement(
     );
 
     // Push
-    execSync(`git -C "${localPath}" push origin "${branchName}"`, {
+    execSync(`git -C "${localPath}" push --force-with-lease origin "${branchName}"`, {
       stdio: "pipe",
       timeout: 30_000,
     });
