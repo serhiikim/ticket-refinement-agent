@@ -17,6 +17,14 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 1500): 
 }
 
 
+const AGENT_MARKER = "<!-- ai-ticket-agent -->";
+
+async function postComment(repoFullName: string, issueNumber: number, body: string): Promise<void> {
+  return ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
+    body: `${body}\n${AGENT_MARKER}`,
+  });
+}
+
 async function ghPost(path: string, body: unknown): Promise<void> {
   return withRetry(async () => {
     const res = await fetch(`https://api.github.com${path}`, {
@@ -121,9 +129,7 @@ export async function handleClarify(
     "_Once answered, I'll pick this up again automatically._",
   ].join("\n");
 
-  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
-    body,
-  });
+  await postComment(repoFullName, issueNumber, body);
 
   await swapLabel(
     repoFullName,
@@ -198,9 +204,7 @@ export async function handleEnhance(
     .filter(Boolean)
     .join("\n");
 
-  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
-    body: summary,
-  });
+  await postComment(repoFullName, issueNumber, summary);
 
   // Ensure ai-enhanced label is set; remove ai-ready and ai-clarifying if present
   await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/labels`, {
@@ -266,9 +270,7 @@ export async function postDraftPrComment(
     return;
   }
 
-  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
-    body: `### Draft PR Ready\n\nCode scaffold has been pushed: ${prUrl}`,
-  });
+  await postComment(repoFullName, issueNumber, `### Draft PR Ready\n\nCode scaffold has been pushed: ${prUrl}`);
 }
 
 export async function handleCodingComplete(

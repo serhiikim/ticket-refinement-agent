@@ -59,6 +59,10 @@ export function filterEvent(
     const sender = (comment.user as { type: string } | undefined)?.type;
     if (sender === "Bot") return no;
 
+    // Skip comments posted by our own agent (PAT user, not Bot type)
+    const commentBody = (comment.body as string | undefined) ?? "";
+    if (commentBody.includes("<!-- ai-ticket-agent -->")) return no;
+
     const repo = payload.repository as Record<string, unknown>;
 
     // Comment on ai-clarifying → resume analysis
