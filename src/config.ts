@@ -13,7 +13,6 @@ function parseRepos(raw: string | undefined): Record<string, { localPath: string
 
 export const config = {
   port: parseInt(process.env.PORT ?? "3008"),
-  githubToken: process.env.GITHUB_TOKEN!,
   webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
   repos: parseRepos(process.env.REPOS),
   labels: {

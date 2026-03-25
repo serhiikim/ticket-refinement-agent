@@ -1,4 +1,5 @@
 import { config } from "./config.ts";
+import { getGitHubToken } from "./githubAuth.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 1500): Promise<T> {
@@ -30,7 +31,7 @@ async function ghPost(path: string, body: unknown): Promise<void> {
     const res = await fetch(`https://api.github.com${path}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.githubToken}`,
+        Authorization: `Bearer ${await getGitHubToken()}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "Content-Type": "application/json",
@@ -48,7 +49,7 @@ async function ghPostJson<T>(path: string, body: unknown): Promise<T> {
     const res = await fetch(`https://api.github.com${path}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.githubToken}`,
+        Authorization: `Bearer ${await getGitHubToken()}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "Content-Type": "application/json",
@@ -69,7 +70,7 @@ async function ghPatch(path: string, body: unknown): Promise<void> {
   const res = await fetch(`https://api.github.com${path}`, {
     method: "PATCH",
     headers: {
-      Authorization: `Bearer ${config.githubToken}`,
+      Authorization: `Bearer ${await getGitHubToken()}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
@@ -92,7 +93,7 @@ async function removeLabel(
     {
       method: "DELETE",
       headers: {
-        Authorization: `Bearer ${config.githubToken}`,
+        Authorization: `Bearer ${await getGitHubToken()}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
       },

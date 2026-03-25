@@ -1,4 +1,5 @@
 import { config } from "./config.ts";
+import { getGitHubToken } from "./githubAuth.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
 
 interface Issue {
@@ -24,7 +25,7 @@ export interface IssueContext {
 async function ghFetch<T>(path: string): Promise<T> {
   const res = await fetch(`https://api.github.com${path}`, {
     headers: {
-      Authorization: `Bearer ${config.githubToken}`,
+      Authorization: `Bearer ${await getGitHubToken()}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
