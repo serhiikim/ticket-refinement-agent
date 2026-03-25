@@ -3,15 +3,19 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("node:fs", () => ({
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
-  writeFileSync: vi.fn(),
 }));
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+vi.mock("node:fs/promises", () => ({
+  writeFile: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { existsSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { loadSessions, getSessionId, setSessionId, clearSessionId } from "./sessions.ts";
 
 const mockExistsSync = vi.mocked(existsSync);
 const mockReadFileSync = vi.mocked(readFileSync);
-const mockWriteFileSync = vi.mocked(writeFileSync);
+const mockWriteFile = vi.mocked(writeFile);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -38,18 +42,18 @@ describe("sessions", () => {
 
   it("persists to disk on set", () => {
     setSessionId("org/repo#1", "session-xyz");
-    expect(mockWriteFileSync).toHaveBeenCalledOnce();
+    expect(mockWriteFile).toHaveBeenCalledOnce();
     const written = JSON.parse(
-      (mockWriteFileSync.mock.calls[0][1] as string)
+      (mockWriteFile.mock.calls[0][1] as string)
     );
     expect(written["org/repo#1"]).toBe("session-xyz");
   });
 
   it("persists to disk on clear", () => {
     setSessionId("org/repo#1", "session-xyz");
-    mockWriteFileSync.mockClear();
+    mockWriteFile.mockClear();
     clearSessionId("org/repo#1");
-    expect(mockWriteFileSync).toHaveBeenCalledOnce();
+    expect(mockWriteFile).toHaveBeenCalledOnce();
   });
 
   it("loads existing sessions from disk on loadSessions", () => {

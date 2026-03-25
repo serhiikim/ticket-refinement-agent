@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const SESSIONS_FILE = join(process.cwd(), "sessions.json");
@@ -15,11 +16,9 @@ export function loadSessions(): void {
 }
 
 function persist(): void {
-  try {
-    writeFileSync(SESSIONS_FILE, JSON.stringify(store, null, 2), "utf8");
-  } catch (e) {
+  writeFile(SESSIONS_FILE, JSON.stringify(store, null, 2), "utf8").catch((e) => {
     console.warn("[sessions] Failed to persist sessions:", e);
-  }
+  });
 }
 
 export function getSessionId(issueKey: string): string | undefined {
