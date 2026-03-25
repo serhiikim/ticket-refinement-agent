@@ -2,10 +2,10 @@ import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { config } from "./config.ts";
-import { buildPrompt, buildCodingPrompt, buildResumedCodingPrompt } from "./contextBuilder.ts";
+import { buildPrompt, buildCodingPrompt, buildResumedCodingPrompt, buildReviewPrompt } from "./contextBuilder.ts";
 import { runClaudeCode, runClaudeCodeImplement, hasClaudeMd } from "./claudeRunner.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
-import { loadSessions, getSessionId, setSessionId, clearSessionId } from "./sessions.ts";
+import { loadSessions, getSessionId, setSessionId, clearSession, getPrNumber, setPrNumber } from "./sessions.ts";
 import { GitHubWebhookAdapter } from "./adapters/GitHubWebhookAdapter.ts";
 import { GitHubTicketProvider } from "./adapters/GitHubTicketProvider.ts";
 import { GitHubSourceControlProvider } from "./adapters/GitHubSourceControlProvider.ts";
@@ -76,6 +76,15 @@ app.post("/webhook/github", async (c) => {
     return c.json({ error: `no repo config for ${event.repoIdentifier}` }, 404);
   }
 
+  // issue_closed: clear session immediately, no Claude run, no repo lock needed
+  if (event.triggerReason === "issue_closed") {
+    const sessionKey = `${event.platform}:${event.ticketId}`;
+    clearSession(sessionKey);
+    processingSet.delete(jobKey);
+    console.log(`[process] Issue ${event.ticketId} closed, session cleared`);
+    return c.json({ accepted: true }, 202);
+  }
+
   const ticketProvider = new GitHubTicketProvider();
   const scProvider = new GitHubSourceControlProvider(event.repoIdentifier);
 
@@ -136,6 +145,11 @@ async function processIssue(
     return;
   }
 
+  if (event.triggerReason === "review_reply") {
+    await runReviewPass(event, ticket, comments, repoConfig, baseBranch, sessionKey, ticketProvider, scProvider);
+    return;
+  }
+
   // Analysis pass
   const prompt = buildPrompt(ticket, comments);
   const sessionId = getSessionId(sessionKey);
@@ -149,7 +163,7 @@ async function processIssue(
     // Session may have expired — retry with a fresh session
     if (sessionId) {
       console.warn(`[process] Session resume failed for ${sessionKey}, retrying fresh:`, err.message);
-      clearSessionId(sessionKey);
+      clearSession(sessionKey);
       return runClaudeCode(repoConfig.localPath, baseBranch, prompt);
     }
     throw err;
@@ -222,20 +236,63 @@ async function runCodingPass(
     // Build issue URL from ticketId "org/repo#123"
     const [repoFull, issueNumStr] = event.ticketId.split("#");
     const issueUrl = `https://github.com/${repoFull}/issues/${issueNumStr}`;
-    const prUrl = await scProvider.createDraftPr(
+    const { url: prUrl, prNumber } = await scProvider.createDraftPr(
       ticket.title,
       baseBranch,
       branchName,
       { platform: event.platform, id: event.ticketId, url: issueUrl }
     );
+    setPrNumber(sessionKey, prNumber);
     await ticketProvider.postComment(
       event.ticketId,
       `### Draft PR Ready\n\nCode scaffold has been pushed: ${prUrl}`
     );
   }
 
-  await ticketProvider.updateStatus(event.ticketId, "done");
-  clearSessionId(sessionKey);
+  await ticketProvider.updateStatus(event.ticketId, "pr-prepared");
+  // Session is kept — review comments will resume from this session
+}
+
+async function runReviewPass(
+  event: GenericTicketEvent,
+  ticket: { title: string; body: string; ticketId: string; labels: string[] },
+  comments: { body: string; isAgentComment: boolean }[],
+  repoConfig: { localPath: string; branch: string },
+  baseBranch: string,
+  sessionKey: string,
+  ticketProvider: ITicketProvider,
+  scProvider: ISourceControlProvider
+): Promise<void> {
+  const prNumber = getPrNumber(sessionKey);
+  if (!prNumber) {
+    console.warn(`[process] No PR number stored for ${sessionKey}, skipping review pass`);
+    return;
+  }
+
+  const sessionId = getSessionId(sessionKey);
+  const issueNumber = event.ticketId.split("#")[1] ?? event.ticketId;
+  const branchName = `ai/issue-${issueNumber}-${slugify(ticket.title)}`;
+  const branchOverride = baseBranch !== repoConfig.branch ? baseBranch : undefined;
+
+  console.log(`[process] Running review pass on branch ${branchName} (PR #${prNumber})${sessionId ? ", resuming session" : ""}`);
+
+  const prDiff = await scProvider.getPrDiff(prNumber);
+  const prompt = buildReviewPrompt(ticket, comments as Parameters<typeof buildReviewPrompt>[1], prDiff, branchOverride);
+
+  await runClaudeCodeImplement(
+    repoConfig.localPath,
+    baseBranch,
+    branchName,
+    prompt,
+    sessionId,
+    "continue"
+  );
+
+  await ticketProvider.postComment(
+    event.ticketId,
+    "PR updated based on your feedback."
+  );
+  // Keep ai-pr-prepared label and session — ready for more review rounds
 }
 
 /** Build the enhanced issue body from a Claude enhance response */

@@ -113,6 +113,46 @@ ${claudeMdSection}
 Implement the changes now.`;
 }
 
+export function buildReviewPrompt(
+  ticket: TicketContext,
+  comments: TicketComment[],
+  prDiff: string,
+  baseBranch?: string
+): string {
+  const latestHumanComment = [...comments].reverse().find((c) => !c.isAgentComment);
+  const feedback = latestHumanComment?.body ?? "(no feedback comment found)";
+
+  const baseBranchSection = baseBranch
+    ? `## Base Branch\nThis PR branches off \`${baseBranch}\` — not the default branch.\n\n`
+    : "";
+
+  return `You are fixing review feedback on an existing PR in a codebase.
+${baseBranchSection}
+## Current PR Diff
+\`\`\`diff
+${prDiff}
+\`\`\`
+
+## Issue: ${ticket.ticketId}
+**Title**: ${ticket.title}
+
+**Body**:
+${ticket.body || "(empty)"}
+
+## Review Feedback
+${feedback}
+
+## Instructions
+- Read the PR diff to understand what is already implemented
+- Address the feedback — make targeted changes, do not rewrite what is correct
+- Follow existing code conventions exactly
+- Do not add extra features beyond what the feedback asks for
+- Make the code actually work — no TODOs or placeholders
+- Commit your fixes
+
+Implement the fixes now.`;
+}
+
 export function buildResumedCodingPrompt(claudeMdExists: boolean, baseBranch?: string): string {
   const claudeMdSection = claudeMdExists
     ? `## CLAUDE.md

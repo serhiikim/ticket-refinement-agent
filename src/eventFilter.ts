@@ -1,6 +1,6 @@
 import { config } from "./config.ts";
 
-export type TriggerReason = "issue_ready" | "comment_reply" | "refinement_reply" | "code_trigger";
+export type TriggerReason = "issue_ready" | "comment_reply" | "refinement_reply" | "code_trigger" | "pr_review" | "issue_closed";
 
 export interface FilterResult {
   shouldProcess: boolean;
@@ -19,6 +19,16 @@ export function filterEvent(
     const action = payload.action as string;
     const issue = payload.issue as Record<string, unknown>;
     const repo = payload.repository as Record<string, unknown>;
+
+    // Issue closed → clear session (no Claude run)
+    if (action === "closed") {
+      return {
+        shouldProcess: true,
+        reason: "issue_closed",
+        repoFullName: repo.full_name as string,
+        issueNumber: issue.number as number,
+      };
+    }
 
     // ai-code label just added → trigger coding pass
     if (action === "labeled") {
@@ -76,6 +86,16 @@ export function filterEvent(
       return {
         shouldProcess: true,
         reason: "refinement_reply",
+        repoFullName: repo.full_name as string,
+        issueNumber: issue.number as number,
+      };
+    }
+
+    // Comment on ai-pr-prepared → review pass
+    if (labels.some((l) => l.name === config.labels.prPrepared)) {
+      return {
+        shouldProcess: true,
+        reason: "pr_review",
         repoFullName: repo.full_name as string,
         issueNumber: issue.number as number,
       };

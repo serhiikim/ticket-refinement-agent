@@ -109,19 +109,28 @@ export async function runClaudeCodeImplement(
   baseBranch: string,
   branchName: string,
   prompt: string,
-  sessionId?: string
+  sessionId?: string,
+  mode: "create" | "continue" = "create"
 ): Promise<string | undefined> {
-  // Ensure we're on the base branch with latest changes
-  execSync(
-    `git -C "${localPath}" checkout ${baseBranch} && git -C "${localPath}" reset --hard origin/${baseBranch}`,
-    { stdio: "pipe", timeout: 30_000 }
-  );
+  if (mode === "continue") {
+    // Fetch and reset to existing remote branch
+    execSync(
+      `git -C "${localPath}" fetch origin && git -C "${localPath}" checkout "${branchName}" && git -C "${localPath}" reset --hard "origin/${branchName}"`,
+      { stdio: "pipe", timeout: 30_000 }
+    );
+  } else {
+    // Ensure we're on the base branch with latest changes
+    execSync(
+      `git -C "${localPath}" checkout ${baseBranch} && git -C "${localPath}" reset --hard origin/${baseBranch}`,
+      { stdio: "pipe", timeout: 30_000 }
+    );
 
-  // Create or reset branch (-B force-recreates if it already exists)
-  execSync(`git -C "${localPath}" checkout -B "${branchName}"`, {
-    stdio: "pipe",
-    timeout: 10_000,
-  });
+    // Create or reset branch (-B force-recreates if it already exists)
+    execSync(`git -C "${localPath}" checkout -B "${branchName}"`, {
+      stdio: "pipe",
+      timeout: 10_000,
+    });
+  }
 
   try {
     // Run Claude to write code (--dangerously-skip-permissions allows file writes without prompts)
@@ -158,11 +167,11 @@ export async function runClaudeCodeImplement(
       { stdio: "pipe", timeout: 10_000 }
     );
 
-    // Push
-    execSync(`git -C "${localPath}" push --force-with-lease origin "${branchName}"`, {
-      stdio: "pipe",
-      timeout: 30_000,
-    });
+    // Push (force-with-lease for new branches, normal push when continuing)
+    const pushCmd = mode === "continue"
+      ? `git -C "${localPath}" push origin "${branchName}"`
+      : `git -C "${localPath}" push --force-with-lease origin "${branchName}"`;
+    execSync(pushCmd, { stdio: "pipe", timeout: 30_000 });
 
     console.log(`[claudeRunner] Pushed branch ${branchName}`);
     return branchName;

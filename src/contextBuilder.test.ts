@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPrompt, buildCodingPrompt } from "./contextBuilder.ts";
+import { buildPrompt, buildCodingPrompt, buildReviewPrompt } from "./contextBuilder.ts";
 import type { TicketContext, TicketComment } from "./types.ts";
 import type { ClaudeResponse } from "./claudeRunner.ts";
 
@@ -123,5 +123,56 @@ describe("buildCodingPrompt", () => {
     const prompt = buildCodingPrompt(makeTicket(), { action: "enhance" }, false);
 
     expect(prompt).not.toContain("Base Branch");
+  });
+});
+
+describe("buildReviewPrompt", () => {
+  const diff = "diff --git a/src/foo.ts b/src/foo.ts\n+const x = 1;";
+
+  it("includes the PR diff", () => {
+    const prompt = buildReviewPrompt(makeTicket(), [], diff);
+
+    expect(prompt).toContain(diff);
+  });
+
+  it("includes the latest human comment as feedback", () => {
+    const comments = [
+      makeComment({ body: "First comment", isAgentComment: false }),
+      makeComment({ body: "Agent reply", isAgentComment: true }),
+      makeComment({ body: "Please fix the types", isAgentComment: false }),
+    ];
+    const prompt = buildReviewPrompt(makeTicket(), comments, diff);
+
+    expect(prompt).toContain("Please fix the types");
+    expect(prompt).not.toContain("Agent reply");
+  });
+
+  it("includes ticket title and ticketId", () => {
+    const prompt = buildReviewPrompt(makeTicket(), [], diff);
+
+    expect(prompt).toContain("Fix login bug");
+    expect(prompt).toContain("org/repo#7");
+  });
+
+  it("includes base branch section when provided", () => {
+    const prompt = buildReviewPrompt(makeTicket(), [], diff, "feature/my-branch");
+
+    expect(prompt).toContain("feature/my-branch");
+    expect(prompt).toContain("Base Branch");
+  });
+
+  it("omits base branch section when not provided", () => {
+    const prompt = buildReviewPrompt(makeTicket(), [], diff);
+
+    expect(prompt).not.toContain("Base Branch");
+  });
+
+  it("shows fallback when no human comment found", () => {
+    const agentComments = [
+      makeComment({ body: "I enhanced this", isAgentComment: true }),
+    ];
+    const prompt = buildReviewPrompt(makeTicket(), agentComments, diff);
+
+    expect(prompt).toContain("(no feedback comment found)");
   });
 });

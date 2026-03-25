@@ -143,7 +143,7 @@ export class GitHubTicketProvider implements ITicketProvider {
     await this.ghPatch(`/repos/${repoFullName}/issues/${issueNumber}`, { body: newBody });
   }
 
-  async updateStatus(id: string, status: "clarifying" | "enhanced" | "done"): Promise<void> {
+  async updateStatus(id: string, status: "clarifying" | "enhanced" | "done" | "pr-prepared"): Promise<void> {
     const { repoFullName, issueNumber } = this.parseId(id);
     if (status === "clarifying") {
       await this.swapLabel(repoFullName, issueNumber, config.labels.ready, config.labels.clarifying);
@@ -156,6 +156,13 @@ export class GitHubTicketProvider implements ITicketProvider {
     } else if (status === "done") {
       await this.swapLabel(repoFullName, issueNumber, config.labels.enhanced, config.labels.done);
       await this.removeLabel(repoFullName, issueNumber, config.labels.code);
+    } else if (status === "pr-prepared") {
+      await this.ghPost(`/repos/${repoFullName}/issues/${issueNumber}/labels`, {
+        labels: [config.labels.prPrepared],
+      });
+      await this.removeLabel(repoFullName, issueNumber, config.labels.enhanced);
+      await this.removeLabel(repoFullName, issueNumber, config.labels.code);
+      await this.removeLabel(repoFullName, issueNumber, config.labels.clarifying);
     }
   }
 }

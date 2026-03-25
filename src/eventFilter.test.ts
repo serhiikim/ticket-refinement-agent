@@ -78,12 +78,17 @@ describe("filterEvent", () => {
       expect(result.shouldProcess).toBe(false);
     });
 
-    it("skips unsupported actions like closed", () => {
+    it("triggers issue_closed on closed action", () => {
       const result = filterEvent(
         "issues",
         makeIssuePayload("closed", [{ name: "ai-ready" }])
       );
-      expect(result.shouldProcess).toBe(false);
+      expect(result).toEqual({
+        shouldProcess: true,
+        reason: "issue_closed",
+        repoFullName: "org/repo",
+        issueNumber: 42,
+      });
     });
 
     it("skips unsupported actions like deleted", () => {
@@ -174,6 +179,27 @@ describe("filterEvent", () => {
       const result = filterEvent(
         "issue_comment",
         makeCommentPayload([{ name: "ai-enhanced" }], "Bot")
+      );
+      expect(result.shouldProcess).toBe(false);
+    });
+
+    it("triggers pr_review on comment with ai-pr-prepared label from non-bot user", () => {
+      const result = filterEvent(
+        "issue_comment",
+        makeCommentPayload([{ name: "ai-pr-prepared" }], "User")
+      );
+      expect(result).toEqual({
+        shouldProcess: true,
+        reason: "pr_review",
+        repoFullName: "org/repo",
+        issueNumber: 42,
+      });
+    });
+
+    it("skips bot comments on ai-pr-prepared issues", () => {
+      const result = filterEvent(
+        "issue_comment",
+        makeCommentPayload([{ name: "ai-pr-prepared" }], "Bot")
       );
       expect(result.shouldProcess).toBe(false);
     });

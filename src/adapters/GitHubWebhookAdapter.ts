@@ -9,6 +9,8 @@ const REASON_MAP: Record<string, TriggerReason> = {
   comment_reply: "clarification_reply",
   refinement_reply: "refinement_reply",
   code_trigger: "code_trigger",
+  pr_review: "review_reply",
+  issue_closed: "issue_closed",
 };
 
 export class GitHubWebhookAdapter implements IWebhookAdapter {

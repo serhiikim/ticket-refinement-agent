@@ -2,7 +2,9 @@ export type TriggerReason =
   | "initial_analysis"
   | "clarification_reply"
   | "refinement_reply"
-  | "code_trigger";
+  | "code_trigger"
+  | "review_reply"
+  | "issue_closed";
 
 export interface GenericTicketEvent {
   platform: "github" | "jira" | "asana";
@@ -36,7 +38,7 @@ export interface ITicketProvider {
   postComment(id: string, body: string): Promise<void>;
   updateDescription(id: string, newBody: string): Promise<void>;
   /** Transitions the ticket to the given abstract workflow state */
-  updateStatus(id: string, status: "clarifying" | "enhanced" | "done"): Promise<void>;
+  updateStatus(id: string, status: "clarifying" | "enhanced" | "done" | "pr-prepared"): Promise<void>;
 }
 
 export interface ISourceControlProvider {
@@ -45,7 +47,8 @@ export interface ISourceControlProvider {
     baseBranch: string,
     featureBranch: string,
     linkedTicket: { platform: string; id: string; url: string }
-  ): Promise<string>;
+  ): Promise<{ url: string; prNumber: number }>;
+  getPrDiff(prNumber: number): Promise<string>;
 }
 
 export interface IWebhookAdapter {

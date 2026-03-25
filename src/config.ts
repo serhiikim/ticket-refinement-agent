@@ -21,5 +21,6 @@ export const config = {
     enhanced: process.env.LABEL_ENHANCED ?? "ai-enhanced",
     code: process.env.LABEL_CODE ?? "ai-code",
     done: process.env.LABEL_DONE ?? "ai-done",
+    prPrepared: process.env.LABEL_PR_PREPARED ?? "ai-pr-prepared",
   },
 };

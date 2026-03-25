@@ -22,7 +22,7 @@ export class GitHubSourceControlProvider implements ISourceControlProvider {
     baseBranch: string,
     featureBranch: string,
     linkedTicket: { platform: string; id: string; url: string }
-  ): Promise<string> {
+  ): Promise<{ url: string; prNumber: number }> {
     const body = [
       `Closes ${linkedTicket.url}`,
       "",
@@ -57,7 +57,30 @@ export class GitHubSourceControlProvider implements ISourceControlProvider {
 
       const pr = (await res.json()) as { html_url: string; number: number };
       console.log(`[GitHubSourceControlProvider] Draft PR #${pr.number} created: ${pr.html_url}`);
-      return pr.html_url;
+      return { url: pr.html_url, prNumber: pr.number };
+    });
+  }
+
+  async getPrDiff(prNumber: number): Promise<string> {
+    return this.withRetry(async () => {
+      const res = await fetch(
+        `https://api.github.com/repos/${this.repoFullName}/pulls/${prNumber}`,
+        {
+          headers: {
+            Authorization: `Bearer ${await getGitHubToken()}`,
+            Accept: "application/vnd.github.diff",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(
+          `GitHub GET /repos/${this.repoFullName}/pulls/${prNumber} (diff) → ${res.status} ${await res.text()}`
+        );
+      }
+
+      return res.text();
     });
   }
 }

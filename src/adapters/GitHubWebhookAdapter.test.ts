@@ -94,6 +94,22 @@ describe("GitHubWebhookAdapter", () => {
       );
       expect(event?.triggerReason).toBe("code_trigger");
     });
+
+    it("maps pr_review → review_reply", () => {
+      const event = adapter.parseEvent(
+        "issue_comment",
+        makeCommentPayload([{ name: "ai-pr-prepared" }])
+      );
+      expect(event?.triggerReason).toBe("review_reply");
+    });
+
+    it("maps issue_closed → issue_closed", () => {
+      const event = adapter.parseEvent(
+        "issues",
+        makeIssuePayload("closed", [])
+      );
+      expect(event?.triggerReason).toBe("issue_closed");
+    });
   });
 
   describe("parseEvent — GenericTicketEvent shape", () => {
