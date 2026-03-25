@@ -111,4 +111,17 @@ describe("buildCodingPrompt", () => {
     expect(prompt).toContain("(none identified)");
     expect(prompt).toContain("Issue #7");
   });
+
+  it("includes base branch section when baseBranch is provided", () => {
+    const prompt = buildCodingPrompt(makeTicket(), { action: "enhance" }, false, "feature/my-feature");
+
+    expect(prompt).toContain("feature/my-feature");
+    expect(prompt).toContain("Base Branch");
+  });
+
+  it("omits base branch section when baseBranch is not provided", () => {
+    const prompt = buildCodingPrompt(makeTicket(), { action: "enhance" }, false);
+
+    expect(prompt).not.toContain("Base Branch");
+  });
 });

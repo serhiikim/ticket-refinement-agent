@@ -55,7 +55,8 @@ Analyze the issue and codebase now, then respond with JSON only.`;
 export function buildCodingPrompt(
   ticket: TicketContext,
   analysis: ClaudeResponse,
-  claudeMdExists: boolean
+  claudeMdExists: boolean,
+  baseBranch?: string
 ): string {
   const issueNumber = ticket.ticketId.split("#")[1] ?? ticket.ticketId;
   const files = analysis.affectedFiles?.map((f) => `- ${f}`).join("\n") ?? "(none identified)";
@@ -78,8 +79,12 @@ No CLAUDE.md exists in this repo yet. After implementing the issue, create one t
 
 Keep it concise and factual — it will be read by Claude on every future ticket.`;
 
-  return `You are implementing a GitHub issue in an existing codebase.
+  const baseBranchSection = baseBranch
+    ? `## Base Branch\nThis implementation branches off \`${baseBranch}\` — not the default branch. The codebase state above reflects that branch.`
+    : "";
 
+  return `You are implementing a GitHub issue in an existing codebase.
+${baseBranchSection ? `\n${baseBranchSection}\n` : ""}
 ## Issue #${issueNumber}: ${ticket.title}
 
 ${analysis.description ?? ticket.body ?? ""}
@@ -108,7 +113,7 @@ ${claudeMdSection}
 Implement the changes now.`;
 }
 
-export function buildResumedCodingPrompt(claudeMdExists: boolean): string {
+export function buildResumedCodingPrompt(claudeMdExists: boolean, baseBranch?: string): string {
   const claudeMdSection = claudeMdExists
     ? `## CLAUDE.md
 Read CLAUDE.md first — it contains architecture context and conventions for this codebase.
@@ -116,8 +121,12 @@ After implementing, update CLAUDE.md only if your changes introduce a new module
     : `## CLAUDE.md
 No CLAUDE.md exists yet. After implementing, create one documenting the project purpose, tech stack, key directories, and coding conventions.`;
 
-  return `The user has reviewed and approved the ticket analysis above. Please implement the changes now.
+  const baseBranchSection = baseBranch
+    ? `## Base Branch\nThis implementation branches off \`${baseBranch}\` — not the default branch.`
+    : "";
 
+  return `The user has reviewed and approved the ticket analysis above. Please implement the changes now.
+${baseBranchSection ? `\n${baseBranchSection}\n` : ""}
 ${claudeMdSection}
 
 ## Instructions

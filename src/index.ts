@@ -92,6 +92,27 @@ app.post("/webhook/github", async (c) => {
   return c.json({ accepted: true }, 202);
 });
 
+/**
+ * Scans the issue body and comments for a "base-branch: <name>" line.
+ * Returns the last match found (so a comment can override the issue body),
+ * or defaultBranch if none is specified.
+ */
+function parseBaseBranch(
+  ticket: { body: string },
+  comments: { body: string }[],
+  defaultBranch: string
+): string {
+  const pattern = /^base-branch:\s*(\S+)/im;
+  let found: string | undefined;
+  const bodyMatch = ticket.body.match(pattern);
+  if (bodyMatch) found = bodyMatch[1];
+  for (const comment of comments) {
+    const m = comment.body.match(pattern);
+    if (m) found = m[1];
+  }
+  return found ?? defaultBranch;
+}
+
 async function processIssue(
   event: GenericTicketEvent,
   repoConfig: { localPath: string; branch: string },
@@ -101,20 +122,27 @@ async function processIssue(
   console.log(`[process] Starting ${event.ticketId} (${event.triggerReason})`);
   const sessionKey = `${event.platform}:${event.ticketId}`;
 
+  // Fetch upfront — needed for base branch resolution in all trigger paths
+  const ticket = await ticketProvider.getTicket(event.ticketId);
+  const comments = await ticketProvider.getComments(event.ticketId);
+  const baseBranch = parseBaseBranch(ticket, comments, repoConfig.branch);
+
+  if (baseBranch !== repoConfig.branch) {
+    console.log(`[process] Base branch override: ${baseBranch} for ${event.ticketId}`);
+  }
+
   if (event.triggerReason === "code_trigger") {
-    await runCodingPass(event, repoConfig, sessionKey, ticketProvider, scProvider);
+    await runCodingPass(event, ticket, repoConfig, baseBranch, sessionKey, ticketProvider, scProvider);
     return;
   }
 
   // Analysis pass
-  const ticket = await ticketProvider.getTicket(event.ticketId);
-  const comments = await ticketProvider.getComments(event.ticketId);
   const prompt = buildPrompt(ticket, comments);
   const sessionId = getSessionId(sessionKey);
 
   let runResult = await runClaudeCode(
     repoConfig.localPath,
-    repoConfig.branch,
+    baseBranch,
     prompt,
     sessionId
   ).catch(async (err) => {
@@ -122,7 +150,7 @@ async function processIssue(
     if (sessionId) {
       console.warn(`[process] Session resume failed for ${sessionKey}, retrying fresh:`, err.message);
       clearSessionId(sessionKey);
-      return runClaudeCode(repoConfig.localPath, repoConfig.branch, prompt);
+      return runClaudeCode(repoConfig.localPath, baseBranch, prompt);
     }
     throw err;
   });
@@ -162,27 +190,29 @@ async function processIssue(
 
 async function runCodingPass(
   event: GenericTicketEvent,
+  ticket: { title: string; body: string; ticketId: string; labels: string[] },
   repoConfig: { localPath: string; branch: string },
+  baseBranch: string,
   sessionKey: string,
   ticketProvider: ITicketProvider,
   scProvider: ISourceControlProvider
 ): Promise<void> {
-  const ticket = await ticketProvider.getTicket(event.ticketId);
   const sessionId = getSessionId(sessionKey);
   const issueNumber = event.ticketId.split("#")[1] ?? event.ticketId;
   const branchName = `ai/issue-${issueNumber}-${slugify(ticket.title)}`;
   const claudeMdExists = hasClaudeMd(repoConfig.localPath);
+  const branchOverride = baseBranch !== repoConfig.branch ? baseBranch : undefined;
 
   console.log(`[process] CLAUDE.md ${claudeMdExists ? "found" : "not found — will create"}`);
-  console.log(`[process] Running coding pass on branch ${branchName}${sessionId ? " (resuming session)" : ""}`);
+  console.log(`[process] Running coding pass on branch ${branchName} (base: ${baseBranch})${sessionId ? ", resuming session" : ""}`);
 
   const codingPrompt = sessionId
-    ? buildResumedCodingPrompt(claudeMdExists)
-    : buildCodingPrompt(ticket, { action: "enhance" }, claudeMdExists);
+    ? buildResumedCodingPrompt(claudeMdExists, branchOverride)
+    : buildCodingPrompt(ticket, { action: "enhance" }, claudeMdExists, branchOverride);
 
   const pushedBranch = await runClaudeCodeImplement(
     repoConfig.localPath,
-    repoConfig.branch,
+    baseBranch,
     branchName,
     codingPrompt,
     sessionId
@@ -194,7 +224,7 @@ async function runCodingPass(
     const issueUrl = `https://github.com/${repoFull}/issues/${issueNumStr}`;
     const prUrl = await scProvider.createDraftPr(
       ticket.title,
-      repoConfig.branch,
+      baseBranch,
       branchName,
       { platform: event.platform, id: event.ticketId, url: issueUrl }
     );
