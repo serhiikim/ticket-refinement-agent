@@ -6,6 +6,7 @@ import { config } from "./config.ts";
 import { filterEvent } from "./eventFilter.ts";
 import { buildContext, buildPrompt, buildCodingPrompt, buildResumedCodingPrompt } from "./contextBuilder.ts";
 import { runClaudeCode, runClaudeCodeImplement, hasClaudeMd } from "./claudeRunner.ts";
+import type { ClaudeResponse } from "./claudeRunner.ts";
 import { handleClarify, handleEnhance, handleCodingComplete, postDraftPrComment } from "./actionHandler.ts";
 import { loadSessions, getSessionId, setSessionId, clearSessionId } from "./sessions.ts";
 import type { TriggerReason } from "./eventFilter.ts";
@@ -147,14 +148,14 @@ async function processIssue(
   console.log(`[process] Claude action: ${result.action} for ${repoFullName}#${issueNumber}`);
 
   if (result.action === "clarify") {
-    await handleClarify(repoFullName, issueNumber, result);
+    await handleClarify(repoFullName, issueNumber, result as ClaudeResponse & { action: "clarify" });
   } else if (result.action === "enhance") {
     await handleEnhance(
       repoFullName,
       issueNumber,
       ctx.issue.title,
       repoConfig.branch,
-      result
+      result as ClaudeResponse & { action: "enhance" }
     );
   } else {
     console.warn(`[process] Unknown action: ${(result as { action: string }).action}`);
@@ -195,7 +196,6 @@ async function runCodingPass(
       ctx.issue.title,
       repoConfig.branch,
       branchName,
-      { action: "enhance", description: ctx.issue.body }
     );
   }
 

@@ -223,34 +223,14 @@ export async function postDraftPrComment(
   issueTitle: string,
   baseBranch: string,
   branchName: string,
-  analysis: ClaudeResponse & { action: "enhance" }
 ): Promise<void> {
-  const { description, acceptanceCriteria, affectedFiles } = analysis;
-
   const prBodySections = [
     `Closes #${issueNumber}`,
     "",
-    "## Summary",
-    description ?? "",
+    `Implements [#${issueNumber} — ${issueTitle}](https://github.com/${repoFullName}/issues/${issueNumber}).`,
+    "",
+    "_Scaffolded by AI Ticket Agent_",
   ];
-
-  if (acceptanceCriteria?.length) {
-    prBodySections.push(
-      "",
-      "## Acceptance Criteria",
-      ...acceptanceCriteria.map((c) => `- [ ] ${c}`)
-    );
-  }
-
-  if (affectedFiles?.length) {
-    prBodySections.push(
-      "",
-      "## Changed Files",
-      ...affectedFiles.map((f) => `- \`${f}\``)
-    );
-  }
-
-  prBodySections.push("", "_Scaffolded by AI Ticket Agent_");
 
   let prUrl: string;
   try {
