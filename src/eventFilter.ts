@@ -1,13 +1,12 @@
 import { config } from "./config.ts";
 
-export type TriggerReason = "issue_ready" | "comment_reply";
+export type TriggerReason = "issue_ready" | "comment_reply" | "refinement_reply" | "code_trigger";
 
 export interface FilterResult {
   shouldProcess: boolean;
   reason?: TriggerReason;
   repoFullName?: string;
   issueNumber?: number;
-  installationLogin?: string;
 }
 
 export function filterEvent(
@@ -18,20 +17,36 @@ export function filterEvent(
 
   if (eventType === "issues") {
     const action = payload.action as string;
-    if (!["opened", "edited", "labeled"].includes(action)) return no;
-
     const issue = payload.issue as Record<string, unknown>;
-    const labels = (issue.labels as { name: string }[]) ?? [];
-    const hasReady = labels.some((l) => l.name === config.labels.ready);
-    if (!hasReady) return no;
-
     const repo = payload.repository as Record<string, unknown>;
-    return {
-      shouldProcess: true,
-      reason: "issue_ready",
-      repoFullName: repo.full_name as string,
-      issueNumber: issue.number as number,
-    };
+
+    // ai-code label just added → trigger coding pass
+    if (action === "labeled") {
+      const addedLabel = (payload.label as { name: string } | undefined)?.name;
+      if (addedLabel === config.labels.code) {
+        return {
+          shouldProcess: true,
+          reason: "code_trigger",
+          repoFullName: repo.full_name as string,
+          issueNumber: issue.number as number,
+        };
+      }
+    }
+
+    // ai-ready label present → trigger analysis
+    if (["opened", "edited", "labeled"].includes(action)) {
+      const labels = (issue.labels as { name: string }[]) ?? [];
+      if (labels.some((l) => l.name === config.labels.ready)) {
+        return {
+          shouldProcess: true,
+          reason: "issue_ready",
+          repoFullName: repo.full_name as string,
+          issueNumber: issue.number as number,
+        };
+      }
+    }
+
+    return no;
   }
 
   if (eventType === "issue_comment") {
@@ -40,23 +55,33 @@ export function filterEvent(
 
     const issue = payload.issue as Record<string, unknown>;
     const labels = (issue.labels as { name: string }[]) ?? [];
-    const hasClarifying = labels.some(
-      (l) => l.name === config.labels.clarifying
-    );
-    if (!hasClarifying) return no;
-
-    // Skip comments from ourselves (bot)
     const comment = payload.comment as Record<string, unknown>;
     const sender = (comment.user as { type: string } | undefined)?.type;
     if (sender === "Bot") return no;
 
     const repo = payload.repository as Record<string, unknown>;
-    return {
-      shouldProcess: true,
-      reason: "comment_reply",
-      repoFullName: repo.full_name as string,
-      issueNumber: issue.number as number,
-    };
+
+    // Comment on ai-clarifying → resume analysis
+    if (labels.some((l) => l.name === config.labels.clarifying)) {
+      return {
+        shouldProcess: true,
+        reason: "comment_reply",
+        repoFullName: repo.full_name as string,
+        issueNumber: issue.number as number,
+      };
+    }
+
+    // Comment on ai-enhanced → refine description
+    if (labels.some((l) => l.name === config.labels.enhanced)) {
+      return {
+        shouldProcess: true,
+        reason: "refinement_reply",
+        repoFullName: repo.full_name as string,
+        issueNumber: issue.number as number,
+      };
+    }
+
+    return no;
   }
 
   return no;

@@ -157,3 +157,24 @@ ${claudeMdSection}
 
 Implement the changes now.`;
 }
+
+export function buildResumedCodingPrompt(claudeMdExists: boolean): string {
+  const claudeMdSection = claudeMdExists
+    ? `## CLAUDE.md
+Read CLAUDE.md first — it contains architecture context and conventions for this codebase.
+After implementing, update CLAUDE.md only if your changes introduce a new module, pattern, or architectural decision.`
+    : `## CLAUDE.md
+No CLAUDE.md exists yet. After implementing, create one documenting the project purpose, tech stack, key directories, and coding conventions.`;
+
+  return `The user has reviewed and approved the ticket analysis above. Please implement the changes now.
+
+${claudeMdSection}
+
+## Instructions
+- Implement the changes to satisfy the acceptance criteria from the analysis above
+- Follow existing code conventions exactly
+- Do not add extra features beyond the issue scope
+- Make the code actually work — no TODOs or placeholders
+
+Implement the changes now.`;
+}

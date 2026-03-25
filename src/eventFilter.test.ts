@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { filterEvent } from "./eventFilter.ts";
 
-function makeIssuePayload(action: string, labels: { name: string }[] = []) {
+function makeIssuePayload(
+  action: string,
+  labels: { name: string }[] = [],
+  addedLabel?: string
+) {
   return {
     action,
+    label: addedLabel ? { name: addedLabel } : undefined,
     issue: {
       number: 42,
       labels,
@@ -88,6 +93,28 @@ describe("filterEvent", () => {
       );
       expect(result.shouldProcess).toBe(false);
     });
+
+    it("triggers code_trigger when ai-code label is added", () => {
+      const result = filterEvent(
+        "issues",
+        makeIssuePayload("labeled", [{ name: "ai-enhanced" }], "ai-code")
+      );
+      expect(result).toEqual({
+        shouldProcess: true,
+        reason: "code_trigger",
+        repoFullName: "org/repo",
+        issueNumber: 42,
+      });
+    });
+
+    it("does not trigger code_trigger for other labels", () => {
+      const result = filterEvent(
+        "issues",
+        makeIssuePayload("labeled", [{ name: "ai-ready" }], "ai-ready")
+      );
+      // ai-ready in issue labels → issue_ready takes precedence, but addedLabel check is first
+      expect(result.reason).toBe("issue_ready");
+    });
   });
 
   describe("issue_comment event", () => {
@@ -127,6 +154,27 @@ describe("filterEvent", () => {
       );
       payload.action = "edited";
       const result = filterEvent("issue_comment", payload);
+      expect(result.shouldProcess).toBe(false);
+    });
+
+    it("triggers refinement_reply on comment with ai-enhanced label", () => {
+      const result = filterEvent(
+        "issue_comment",
+        makeCommentPayload([{ name: "ai-enhanced" }], "User")
+      );
+      expect(result).toEqual({
+        shouldProcess: true,
+        reason: "refinement_reply",
+        repoFullName: "org/repo",
+        issueNumber: 42,
+      });
+    });
+
+    it("skips bot comments on ai-enhanced issues", () => {
+      const result = filterEvent(
+        "issue_comment",
+        makeCommentPayload([{ name: "ai-enhanced" }], "Bot")
+      );
       expect(result.shouldProcess).toBe(false);
     });
   });

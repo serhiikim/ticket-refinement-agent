@@ -36,11 +36,11 @@ describe("runClaudeCode", () => {
       signal: null,
     });
 
-    const result = await runClaudeCode("/tmp/repo", "main", "test prompt");
+    const { response } = await runClaudeCode("/tmp/repo", "main", "test prompt");
 
-    expect(result.action).toBe("enhance");
-    expect(result.description).toBe("Fixed the bug");
-    expect(result.affectedFiles).toEqual(["src/foo.ts"]);
+    expect(response.action).toBe("enhance");
+    expect(response.description).toBe("Fixed the bug");
+    expect(response.affectedFiles).toEqual(["src/foo.ts"]);
   });
 
   it("parses a valid JSON response not wrapped", async () => {
@@ -56,10 +56,10 @@ describe("runClaudeCode", () => {
       signal: null,
     });
 
-    const result = await runClaudeCode("/tmp/repo", "main", "test prompt");
+    const { response } = await runClaudeCode("/tmp/repo", "main", "test prompt");
 
-    expect(result.action).toBe("clarify");
-    expect(result.questions).toEqual(["What is the expected behavior?"]);
+    expect(response.action).toBe("clarify");
+    expect(response.questions).toEqual(["What is the expected behavior?"]);
   });
 
   it("strips markdown code fences from response", async () => {
@@ -77,10 +77,10 @@ describe("runClaudeCode", () => {
       signal: null,
     });
 
-    const result = await runClaudeCode("/tmp/repo", "main", "test prompt");
+    const { response } = await runClaudeCode("/tmp/repo", "main", "test prompt");
 
-    expect(result.action).toBe("enhance");
-    expect(result.description).toBe("desc");
+    expect(response.action).toBe("enhance");
+    expect(response.description).toBe("desc");
   });
 
   it("throws on non-zero exit code", async () => {
@@ -129,5 +129,57 @@ describe("runClaudeCode", () => {
       expect.stringContaining("git -C \"/tmp/repo\" fetch origin"),
       expect.any(Object)
     );
+  });
+
+  it("extracts session_id from the JSON wrapper", async () => {
+    mockSpawnSync.mockReturnValue({
+      status: 0,
+      stdout: JSON.stringify({
+        result: JSON.stringify({ action: "clarify", questions: ["?"] }),
+        session_id: "abc-123",
+      }),
+      stderr: "",
+      pid: 1,
+      output: [],
+      signal: null,
+    });
+
+    const { sessionId } = await runClaudeCode("/tmp/repo", "main", "prompt");
+    expect(sessionId).toBe("abc-123");
+  });
+
+  it("passes --resume flag when sessionId is provided", async () => {
+    mockSpawnSync.mockReturnValue({
+      status: 0,
+      stdout: JSON.stringify({ action: "clarify", questions: ["?"] }),
+      stderr: "",
+      pid: 1,
+      output: [],
+      signal: null,
+    });
+
+    await runClaudeCode("/tmp/repo", "main", "prompt", "my-session-id");
+
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(["--resume", "my-session-id"]),
+      expect.any(Object)
+    );
+  });
+
+  it("does not pass --resume flag when no sessionId", async () => {
+    mockSpawnSync.mockReturnValue({
+      status: 0,
+      stdout: JSON.stringify({ action: "clarify", questions: ["?"] }),
+      stderr: "",
+      pid: 1,
+      output: [],
+      signal: null,
+    });
+
+    await runClaudeCode("/tmp/repo", "main", "prompt");
+
+    const args = mockSpawnSync.mock.calls[0][1] as string[];
+    expect(args).not.toContain("--resume");
   });
 });

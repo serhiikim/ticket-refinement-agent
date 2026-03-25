@@ -25,11 +25,17 @@ export interface ClaudeResponse {
   createDraftPr?: boolean;
 }
 
+export interface ClaudeRunResult {
+  response: ClaudeResponse;
+  sessionId?: string;
+}
+
 export async function runClaudeCode(
   localPath: string,
   branch: string,
-  prompt: string
-): Promise<ClaudeResponse> {
+  prompt: string,
+  sessionId?: string
+): Promise<ClaudeRunResult> {
   // Pull latest
   try {
     execSync(`git -C "${localPath}" fetch origin && git -C "${localPath}" reset --hard origin/${branch}`, {
@@ -41,9 +47,13 @@ export async function runClaudeCode(
   }
 
   // Run claude code with --print flag (non-interactive JSON output)
+  const args = ["--print", "--output-format", "json"];
+  if (sessionId) args.push("--resume", sessionId);
+  args.push(prompt);
+
   const result = spawnSync(
     claudeBin,
-    ["--print", "--output-format", "json", prompt],
+    args,
     {
       cwd: localPath,
       encoding: "utf8",
@@ -67,9 +77,11 @@ export async function runClaudeCode(
   }
 
   let text: string;
+  let returnedSessionId: string | undefined;
   try {
-    const wrapper = JSON.parse(result.stdout.trim()) as { result?: string };
+    const wrapper = JSON.parse(result.stdout.trim()) as { result?: string; session_id?: string };
     text = wrapper.result ?? result.stdout.trim();
+    returnedSessionId = wrapper.session_id;
   } catch {
     text = result.stdout.trim();
   }
@@ -78,7 +90,7 @@ export async function runClaudeCode(
   text = text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
 
   try {
-    return JSON.parse(text) as ClaudeResponse;
+    return { response: JSON.parse(text) as ClaudeResponse, sessionId: returnedSessionId };
   } catch {
     throw new Error(`Failed to parse Claude response as JSON:\n${text.slice(0, 1000)}`);
   }
@@ -96,7 +108,8 @@ export async function runClaudeCodeImplement(
   localPath: string,
   baseBranch: string,
   branchName: string,
-  prompt: string
+  prompt: string,
+  sessionId?: string
 ): Promise<string | undefined> {
   // Ensure we're on the base branch with latest changes
   execSync(
@@ -112,9 +125,13 @@ export async function runClaudeCodeImplement(
 
   try {
     // Run Claude to write code (--dangerously-skip-permissions allows file writes without prompts)
+    const implArgs = ["--print", "--dangerously-skip-permissions"];
+    if (sessionId) implArgs.push("--resume", sessionId);
+    implArgs.push(prompt);
+
     spawnSync(
       claudeBin,
-      ["--print", "--dangerously-skip-permissions", prompt],
+      implArgs,
       {
         cwd: localPath,
         encoding: "utf8",

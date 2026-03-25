@@ -74,19 +74,13 @@ async function ghPatch(path: string, body: unknown): Promise<void> {
   });
 }
 
-async function swapLabel(
+async function removeLabel(
   repoFullName: string,
   issueNumber: number,
-  remove: string,
-  add: string
+  label: string
 ): Promise<void> {
-  // Add new label
-  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/labels`, {
-    labels: [add],
-  });
-  // Remove old label (ignore 404 if it wasn't there)
   const res = await fetch(
-    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/labels/${encodeURIComponent(remove)}`,
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`,
     {
       method: "DELETE",
       headers: {
@@ -97,8 +91,18 @@ async function swapLabel(
     }
   );
   if (!res.ok && res.status !== 404) {
-    console.warn(`[actionHandler] Could not remove label ${remove}: ${res.status}`);
+    console.warn(`[actionHandler] Could not remove label ${label}: ${res.status}`);
   }
+}
+
+async function swapLabel(
+  repoFullName: string,
+  issueNumber: number,
+  remove: string,
+  add: string
+): Promise<void> {
+  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/labels`, { labels: [add] });
+  await removeLabel(repoFullName, issueNumber, remove);
 }
 
 export async function handleClarify(
@@ -178,7 +182,7 @@ export async function handleEnhance(
     body: enhancedBody,
   });
 
-  // Post summary comment
+  // Post review comment asking human to approve
   const summary = [
     "### Ticket Enhanced",
     "",
@@ -187,6 +191,9 @@ export async function handleEnhance(
     affectedFiles?.length ? `- **${affectedFiles.length}** affected file(s)` : null,
     edgeCases?.length ? `- **${edgeCases.length}** edge case(s)` : null,
     risks?.length ? `- **${risks.length}** risk(s)` : null,
+    "",
+    `**Ready to proceed?** Add the \`${config.labels.code}\` label to start the coding pass.`,
+    "_Want changes? Leave a comment and I'll refine the description._",
   ]
     .filter(Boolean)
     .join("\n");
@@ -195,20 +202,12 @@ export async function handleEnhance(
     body: summary,
   });
 
-  await swapLabel(
-    repoFullName,
-    issueNumber,
-    config.labels.ready,
-    config.labels.done
-  );
-
-  // Also swap clarifying → done if it's there
-  await swapLabel(
-    repoFullName,
-    issueNumber,
-    config.labels.clarifying,
-    config.labels.done
-  ).catch(() => {});
+  // Ensure ai-enhanced label is set; remove ai-ready and ai-clarifying if present
+  await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/labels`, {
+    labels: [config.labels.enhanced],
+  });
+  await removeLabel(repoFullName, issueNumber, config.labels.ready);
+  await removeLabel(repoFullName, issueNumber, config.labels.clarifying);
 
   console.log(`[actionHandler] Enhanced issue ${repoFullName}#${issueNumber}`);
 }
@@ -270,4 +269,13 @@ export async function postDraftPrComment(
   await ghPost(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
     body: `### Draft PR Ready\n\nCode scaffold has been pushed: ${prUrl}`,
   });
+}
+
+export async function handleCodingComplete(
+  repoFullName: string,
+  issueNumber: number
+): Promise<void> {
+  await swapLabel(repoFullName, issueNumber, config.labels.enhanced, config.labels.done);
+  await removeLabel(repoFullName, issueNumber, config.labels.code);
+  console.log(`[actionHandler] Marked ${repoFullName}#${issueNumber} as done`);
 }

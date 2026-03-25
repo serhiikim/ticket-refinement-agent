@@ -19,6 +19,8 @@ export const config = {
   labels: {
     ready: process.env.LABEL_READY ?? "ai-ready",
     clarifying: process.env.LABEL_CLARIFYING ?? "ai-clarifying",
+    enhanced: process.env.LABEL_ENHANCED ?? "ai-enhanced",
+    code: process.env.LABEL_CODE ?? "ai-code",
     done: process.env.LABEL_DONE ?? "ai-done",
   },
 };

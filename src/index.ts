@@ -4,10 +4,11 @@ import { Hono } from "hono";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { config } from "./config.ts";
 import { filterEvent } from "./eventFilter.ts";
-import { buildContext, buildPrompt, buildCodingPrompt } from "./contextBuilder.ts";
+import { buildContext, buildPrompt, buildCodingPrompt, buildResumedCodingPrompt } from "./contextBuilder.ts";
 import { runClaudeCode, runClaudeCodeImplement, hasClaudeMd } from "./claudeRunner.ts";
-import { handleClarify, handleEnhance, postDraftPrComment } from "./actionHandler.ts";
-import type { ClaudeResponse } from "./claudeRunner.ts";
+import { handleClarify, handleEnhance, handleCodingComplete, postDraftPrComment } from "./actionHandler.ts";
+import { loadSessions, getSessionId, setSessionId, clearSessionId } from "./sessions.ts";
+import type { TriggerReason } from "./eventFilter.ts";
 
 function slugify(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
@@ -27,6 +28,8 @@ function withRepoLock(localPath: string, fn: () => Promise<void>): Promise<void>
   repoLocks.set(localPath, next);
   return next;
 }
+
+loadSessions();
 
 const app = new Hono();
 
@@ -70,11 +73,9 @@ app.post("/webhook/github", async (c) => {
     return c.json({ skipped: true });
   }
 
-  const { repoFullName, issueNumber } = filter;
+  const { repoFullName, issueNumber, reason } = filter;
 
   // Dedup: skip if already processing this issue
-  // This check MUST happen synchronously (no awaits between has() and add())
-  // to prevent two simultaneous events from both passing the check
   const jobKey = `${repoFullName}#${issueNumber}`;
   if (processingSet.has(jobKey)) {
     console.log(`[webhook] Skipping duplicate job ${jobKey}`);
@@ -92,7 +93,7 @@ app.post("/webhook/github", async (c) => {
 
   // Serialize per repo, fire-and-forget
   withRepoLock(repoConfig.localPath, () =>
-    processIssue(repoFullName!, issueNumber!, repoConfig).finally(() => {
+    processIssue(repoFullName!, issueNumber!, repoConfig, reason!).finally(() => {
       processingSet.delete(jobKey);
     })
   ).catch((err) => {
@@ -106,62 +107,100 @@ app.post("/webhook/github", async (c) => {
 async function processIssue(
   repoFullName: string,
   issueNumber: number,
-  repoConfig: { localPath: string; branch: string }
+  repoConfig: { localPath: string; branch: string },
+  reason: TriggerReason
 ): Promise<void> {
-  console.log(`[process] Starting ${repoFullName}#${issueNumber}`);
+  console.log(`[process] Starting ${repoFullName}#${issueNumber} (${reason})`);
 
+  const issueKey = `${repoFullName}#${issueNumber}`;
+
+  if (reason === "code_trigger") {
+    await runCodingPass(repoFullName, issueNumber, repoConfig, issueKey);
+    return;
+  }
+
+  // Analysis pass
   const ctx = await buildContext(repoFullName, issueNumber);
   const prompt = buildPrompt(ctx);
+  const sessionId = getSessionId(issueKey);
 
-  const result: ClaudeResponse = await runClaudeCode(
+  let runResult = await runClaudeCode(
     repoConfig.localPath,
     repoConfig.branch,
-    prompt
-  );
+    prompt,
+    sessionId
+  ).catch(async (err) => {
+    // Session may have expired — retry with a fresh session
+    if (sessionId) {
+      console.warn(`[process] Session resume failed for ${issueKey}, retrying fresh:`, err.message);
+      clearSessionId(issueKey);
+      return runClaudeCode(repoConfig.localPath, repoConfig.branch, prompt);
+    }
+    throw err;
+  });
 
+  if (runResult.sessionId) {
+    setSessionId(issueKey, runResult.sessionId);
+  }
+
+  const result = runResult.response;
   console.log(`[process] Claude action: ${result.action} for ${repoFullName}#${issueNumber}`);
 
   if (result.action === "clarify") {
-    await handleClarify(repoFullName, issueNumber, result as ClaudeResponse & { action: "clarify" });
+    await handleClarify(repoFullName, issueNumber, result);
   } else if (result.action === "enhance") {
-    const enhance = result as ClaudeResponse & { action: "enhance" };
-
-    // Update issue description first
     await handleEnhance(
       repoFullName,
       issueNumber,
       ctx.issue.title,
       repoConfig.branch,
-      enhance
+      result
     );
-
-    // Then run coding pass if requested
-    if (enhance.createDraftPr) {
-      const branchName = `ai/issue-${issueNumber}-${slugify(ctx.issue.title)}`;
-      const claudeMdExists = hasClaudeMd(repoConfig.localPath);
-      console.log(`[process] CLAUDE.md ${claudeMdExists ? "found" : "not found — will create"}`);
-      const codingPrompt = buildCodingPrompt(ctx, enhance, claudeMdExists);
-      console.log(`[process] Running coding pass on branch ${branchName}`);
-      const pushedBranch = await runClaudeCodeImplement(
-        repoConfig.localPath,
-        repoConfig.branch,
-        branchName,
-        codingPrompt
-      );
-      if (pushedBranch) {
-        await postDraftPrComment(
-          repoFullName,
-          issueNumber,
-          ctx.issue.title,
-          repoConfig.branch,
-          branchName,
-          enhance
-        );
-      }
-    }
   } else {
     console.warn(`[process] Unknown action: ${(result as { action: string }).action}`);
   }
+}
+
+async function runCodingPass(
+  repoFullName: string,
+  issueNumber: number,
+  repoConfig: { localPath: string; branch: string },
+  issueKey: string
+): Promise<void> {
+  const ctx = await buildContext(repoFullName, issueNumber);
+  const sessionId = getSessionId(issueKey);
+  const branchName = `ai/issue-${issueNumber}-${slugify(ctx.issue.title)}`;
+  const claudeMdExists = hasClaudeMd(repoConfig.localPath);
+
+  console.log(`[process] CLAUDE.md ${claudeMdExists ? "found" : "not found — will create"}`);
+  console.log(`[process] Running coding pass on branch ${branchName}${sessionId ? " (resuming session)" : ""}`);
+
+  // If we have a session, use a short resumed prompt; otherwise fall back to full prompt
+  const codingPrompt = sessionId
+    ? buildResumedCodingPrompt(claudeMdExists)
+    : buildCodingPrompt(ctx, { action: "enhance" }, claudeMdExists);
+
+  const pushedBranch = await runClaudeCodeImplement(
+    repoConfig.localPath,
+    repoConfig.branch,
+    branchName,
+    codingPrompt,
+    sessionId
+  );
+
+  if (pushedBranch) {
+    await postDraftPrComment(
+      repoFullName,
+      issueNumber,
+      ctx.issue.title,
+      repoConfig.branch,
+      branchName,
+      { action: "enhance", description: ctx.issue.body }
+    );
+  }
+
+  await handleCodingComplete(repoFullName, issueNumber);
+  clearSessionId(issueKey);
 }
 
 export { app, repoLocks };
@@ -181,10 +220,8 @@ async function shutdown(signal: string) {
   shuttingDown = true;
   console.log(`[shutdown] ${signal} received, draining in-flight jobs...`);
 
-  // Stop accepting new connections
   server.close();
 
-  // Wait for all repo locks (in-flight jobs) to finish
   await Promise.allSettled([...repoLocks.values()]);
 
   console.log("[shutdown] All jobs drained, exiting.");
@@ -193,4 +230,3 @@ async function shutdown(signal: string) {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-
