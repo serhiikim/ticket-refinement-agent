@@ -14,6 +14,8 @@ npx tsc --noEmit  # Type check without emitting
 Use `/push` to typecheck + test + commit + push in one step.
 Use `/review-docs` after significant changes to check whether CLAUDE.md or README.md need updating.
 
+**IMPORTANT:** This repo uses `semantic-release` for automated versioning. All commit messages must strictly adhere to the [Conventional Commits](https://www.conventionalcommits.org/) format (e.g., `feat:`, `fix:`, `chore:`, `docs:`). Do not use non-conventional commits.
+
 ## Architecture
 
 A Hono webhook server that listens for GitHub issue events and uses Claude Code (subprocess calls) to analyze, enhance, and implement tickets grounded in the actual codebase.

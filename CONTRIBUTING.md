@@ -62,7 +62,13 @@ We use [Vitest](https://vitest.dev/) for unit testing. **All new adapters or com
 
 ---
 
-## 📝 Pull Request Guidelines
+## 📝 Pull Request Guidelines & Versioning
+
+This repository uses **[semantic-release](https://semantic-release.gitbook.io/)** to automate version bumping and GitHub releases entirely in CI. Because of this, **all commits and PR titles must strictly follow the [Conventional Commits specification](https://www.conventionalcommits.org/)**.
+
+- Use `feat:` for new features (triggers a `MINOR` release step: e.g., 1.0.0 → 1.1.0).
+- Use `fix:` for bug fixes (triggers a `PATCH` release step: e.g., 1.0.0 → 1.0.1).
+- Use `chore:`, `docs:`, `test:`, `refactor:` etc., for changes that do not require an immediate version bump.
 
 1. **Fork the repo** and create your branch from `main`.
 2. **If you've added code that should be tested, add tests.** (Check out `src/adapters/GitHubWebhookAdapter.test.ts` for examples).
