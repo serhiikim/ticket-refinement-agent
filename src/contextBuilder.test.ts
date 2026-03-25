@@ -88,7 +88,7 @@ describe("buildCodingPrompt", () => {
       edgeCases: ["Expired reset token"],
     };
 
-    const prompt = buildCodingPrompt(ctx, analysis);
+    const prompt = buildCodingPrompt(ctx, analysis, true);
 
     expect(prompt).toContain("src/auth/login.ts");
     expect(prompt).toContain("src/auth/reset.ts");
@@ -104,7 +104,7 @@ describe("buildCodingPrompt", () => {
       action: "enhance",
     };
 
-    const prompt = buildCodingPrompt(ctx, analysis);
+    const prompt = buildCodingPrompt(ctx, analysis, false);
 
     expect(prompt).toContain("(none identified)");
     expect(prompt).toContain("Issue #7");
