@@ -135,7 +135,7 @@ export async function runClaudeCodeImplement(
       {
         cwd: localPath,
         encoding: "utf8",
-        timeout: 300_000,
+        timeout: 600_000, // 10 min — coding pass needs more time than analysis
         env: { ...process.env, CLAUDE_NO_TELEMETRY: "1" },
       }
     );
