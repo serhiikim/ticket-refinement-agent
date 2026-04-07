@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/serhiikim/ticket-refinement-agent/compare/v1.0.0...v1.0.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* detect Claude-committed changes and post accurate review comments ([550c404](https://github.com/serhiikim/ticket-refinement-agent/commit/550c404065168d3a8b781ecc920a43025ee65a88))
+
 # 1.0.0 (2026-03-25)
 
 
