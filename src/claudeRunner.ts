@@ -170,7 +170,7 @@ export async function runClaudeCodeImplement(
     try {
       unpushed = execSync(
         `git -C "${localPath}" rev-list origin/${branchName}..HEAD --count`,
-        { encoding: "utf8", timeout: 10_000 }
+        { encoding: "utf8", stdio: "pipe", timeout: 10_000 }
       ).trim();
     } catch {
       unpushed = "1";

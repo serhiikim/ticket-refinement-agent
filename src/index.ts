@@ -160,13 +160,13 @@ async function processIssue(
     prompt,
     sessionId
   ).catch(async (err) => {
-    // Session may have expired — retry with a fresh session
+    // Retry with a fresh session on any transient failure (session expiry or bad Claude output).
+    // If there was no session to begin with, a second attempt is still worth trying.
     if (sessionId) {
-      console.warn(`[process] Session resume failed for ${sessionKey}, retrying fresh:`, err.message);
       clearSession(sessionKey);
-      return runClaudeCode(repoConfig.localPath, baseBranch, prompt);
     }
-    throw err;
+    console.warn(`[process] Analysis failed for ${sessionKey}, retrying fresh:`, err.message);
+    return runClaudeCode(repoConfig.localPath, baseBranch, prompt);
   });
 
   if (runResult.sessionId) {
