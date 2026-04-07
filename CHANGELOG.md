@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/serhiikim/ticket-refinement-agent/compare/v1.0.1...v1.0.2) (2026-04-07)
+
+
+### Bug Fixes
+
+* retry analysis on any transient failure and suppress git stderr noise ([d060c75](https://github.com/serhiikim/ticket-refinement-agent/commit/d060c759ef1c1d456d3cf7e8987c25d9e38bf02e))
+
 ## [1.0.1](https://github.com/serhiikim/ticket-refinement-agent/compare/v1.0.0...v1.0.1) (2026-04-07)
 
 
