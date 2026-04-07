@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { runClaudeCode } from "./claudeRunner.ts";
+import { runClaudeCode, runClaudeCodeImplement } from "./claudeRunner.ts";
 
 // Mock child_process
 vi.mock("node:child_process", () => ({
@@ -181,5 +181,82 @@ describe("runClaudeCode", () => {
 
     const args = mockSpawnSync.mock.calls[0][1] as string[];
     expect(args).not.toContain("--resume");
+  });
+});
+
+describe("runClaudeCodeImplement", () => {
+  const successSpawn = {
+    status: 0,
+    stdout: "",
+    stderr: "",
+    pid: 1,
+    output: [],
+    signal: null,
+  };
+
+  beforeEach(() => {
+    mockSpawnSync.mockReturnValue(successSpawn);
+  });
+
+  it("returns branch name when Claude leaves uncommitted changes", async () => {
+    mockExecSync
+      .mockReturnValueOnce("") // git checkout + reset (continue)
+      .mockReturnValueOnce("M src/foo.ts\n") // git status --porcelain (dirty)
+      .mockReturnValueOnce("") // git add -A
+      .mockReturnValueOnce("") // git commit
+      .mockReturnValueOnce("1\n") // rev-list count
+      .mockReturnValueOnce("") // git push
+      .mockReturnValueOnce(""); // git checkout base (finally)
+
+    const result = await runClaudeCodeImplement(
+      "/tmp/repo", "main", "ai/issue-1-my-feature", "prompt", undefined, "continue"
+    );
+
+    expect(result).toBe("ai/issue-1-my-feature");
+  });
+
+  it("returns branch name when Claude committed itself (clean status but unpushed commits)", async () => {
+    mockExecSync
+      .mockReturnValueOnce("") // git checkout + reset (continue)
+      .mockReturnValueOnce("") // git status --porcelain (clean — Claude committed)
+      .mockReturnValueOnce("2\n") // rev-list count — 2 commits ahead
+      .mockReturnValueOnce("") // git push
+      .mockReturnValueOnce(""); // git checkout base (finally)
+
+    const result = await runClaudeCodeImplement(
+      "/tmp/repo", "main", "ai/issue-1-my-feature", "prompt", undefined, "continue"
+    );
+
+    expect(result).toBe("ai/issue-1-my-feature");
+  });
+
+  it("returns undefined when Claude made no changes", async () => {
+    mockExecSync
+      .mockReturnValueOnce("") // git checkout + reset (continue)
+      .mockReturnValueOnce("") // git status --porcelain (clean)
+      .mockReturnValueOnce("0\n") // rev-list count — nothing ahead
+      .mockReturnValueOnce(""); // git checkout base (finally)
+
+    const result = await runClaudeCodeImplement(
+      "/tmp/repo", "main", "ai/issue-1-my-feature", "prompt", undefined, "continue"
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  it("treats rev-list failure as having commits (new branch not yet on remote)", async () => {
+    mockExecSync
+      .mockReturnValueOnce("") // git checkout baseBranch + reset (create)
+      .mockReturnValueOnce("") // git checkout -B branchName
+      .mockReturnValueOnce("") // git status --porcelain (clean)
+      .mockImplementationOnce(() => { throw new Error("unknown revision origin/ai/issue-1-my-feature"); }) // rev-list throws
+      .mockReturnValueOnce("") // git push --force-with-lease
+      .mockReturnValueOnce(""); // git checkout base (finally)
+
+    const result = await runClaudeCodeImplement(
+      "/tmp/repo", "main", "ai/issue-1-my-feature", "prompt", undefined, "create"
+    );
+
+    expect(result).toBe("ai/issue-1-my-feature");
   });
 });

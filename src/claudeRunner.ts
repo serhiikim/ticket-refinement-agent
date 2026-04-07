@@ -149,23 +149,37 @@ export async function runClaudeCodeImplement(
       }
     );
 
-    // Check if anything changed
+    // Check for uncommitted working tree changes
     const status = execSync(`git -C "${localPath}" status --porcelain`, {
       encoding: "utf8",
       timeout: 10_000,
     }).trim();
 
-    if (!status) {
+    if (status) {
+      // Stage and commit any uncommitted changes Claude left behind
+      execSync(`git -C "${localPath}" add -A`, { stdio: "pipe", timeout: 10_000 });
+      execSync(
+        `git -C "${localPath}" -c user.email="ai-agent@local" -c user.name="AI Ticket Agent" commit -m "feat: scaffold implementation for issue"`,
+        { stdio: "pipe", timeout: 10_000 }
+      );
+    }
+
+    // Check for unpushed commits (Claude may have committed itself).
+    // rev-list will throw if origin branch doesn't exist yet (new branch) — treat that as having commits.
+    let unpushed: string;
+    try {
+      unpushed = execSync(
+        `git -C "${localPath}" rev-list origin/${branchName}..HEAD --count`,
+        { encoding: "utf8", timeout: 10_000 }
+      ).trim();
+    } catch {
+      unpushed = "1";
+    }
+
+    if (unpushed === "0") {
       console.log(`[claudeRunner] No file changes on branch ${branchName}, skipping PR`);
       return undefined;
     }
-
-    // Commit
-    execSync(`git -C "${localPath}" add -A`, { stdio: "pipe", timeout: 10_000 });
-    execSync(
-      `git -C "${localPath}" -c user.email="ai-agent@local" -c user.name="AI Ticket Agent" commit -m "feat: scaffold implementation for issue"`,
-      { stdio: "pipe", timeout: 10_000 }
-    );
 
     // Push (force-with-lease for new branches, normal push when continuing)
     const pushCmd = mode === "continue"

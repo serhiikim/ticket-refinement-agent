@@ -279,7 +279,7 @@ async function runReviewPass(
   const prDiff = await scProvider.getPrDiff(prNumber);
   const prompt = buildReviewPrompt(ticket, comments as Parameters<typeof buildReviewPrompt>[1], prDiff, branchOverride);
 
-  await runClaudeCodeImplement(
+  const pushedBranch = await runClaudeCodeImplement(
     repoConfig.localPath,
     baseBranch,
     branchName,
@@ -288,10 +288,17 @@ async function runReviewPass(
     "continue"
   );
 
-  await ticketProvider.postComment(
-    event.ticketId,
-    "PR updated based on your feedback."
-  );
+  if (pushedBranch) {
+    await ticketProvider.postComment(
+      event.ticketId,
+      "PR updated based on your feedback."
+    );
+  } else {
+    await ticketProvider.postComment(
+      event.ticketId,
+      "I reviewed your feedback but found no changes were needed — the current implementation already addresses it. Let me know if you'd like me to look at anything specific."
+    );
+  }
   // Keep ai-pr-prepared label and session — ready for more review rounds
 }
 
