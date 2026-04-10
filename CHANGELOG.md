@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/serhiikim/ticket-refinement-agent/compare/v1.0.2...v1.1.0) (2026-04-10)
+
+
+### Features
+
+* add eslint with typescript-eslint and integrate into Stop hook ([5377c55](https://github.com/serhiikim/ticket-refinement-agent/commit/5377c558e28cbd770a3f7bdae407a9714de259cd))
+
 ## [1.0.2](https://github.com/serhiikim/ticket-refinement-agent/compare/v1.0.1...v1.0.2) (2026-04-07)
 
 
