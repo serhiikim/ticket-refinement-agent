@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd $CLAUDE_PROJECT_DIR && npx tsc --noEmit 2>&1; npm test 2>&1; exit 0"
+            "command": "cd $CLAUDE_PROJECT_DIR && npx tsc --noEmit 2>&1; npm run lint 2>&1; npm test 2>&1; exit 0"
           }
         ]
       }

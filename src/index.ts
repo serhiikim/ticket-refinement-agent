@@ -154,7 +154,7 @@ async function processIssue(
   const prompt = buildPrompt(ticket, comments);
   const sessionId = getSessionId(sessionKey);
 
-  let runResult = await runClaudeCode(
+  const runResult = await runClaudeCode(
     repoConfig.localPath,
     baseBranch,
     prompt,
